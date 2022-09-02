@@ -84,11 +84,11 @@ function ChainRulesCore.rrule(::typeof(solve_implicit), implicit, x)
     y = implicit(x)
 
     # compute residual partial derivative matrices
-    ry(ytilde) = implicit.residual(xv, ytilde)
-    rx(xtilde) = implicit.residual(xtilde, yv)
+    ry(ytilde) = implicit.residual(x, ytilde)
+    rx(xtilde) = implicit.residual(xtilde, y)
 
-    A = ForwardDiff.jacobian(ry, yv)  # computing partials with ForwardDiff (could use other methods)
-    B = ForwardDiff.jacobian(rx, xv)
+    A = ForwardDiff.jacobian(ry, y)  # computing partials with ForwardDiff (could use other methods)
+    B = ForwardDiff.jacobian(rx, x)
 
     function implicit_pullback(dy)
         println("calling pullback")
@@ -135,8 +135,7 @@ end
 function lin_overload(x)
     y1 = 2.0*x
     lin_imp = ImplicitFunction(lin_solver, lin_residual)
-    
-    y2 = lin_imp(y1)
+    y2 = solve_implicit(lin_imp, y1)
     z = 2.0*y2
     return z
 end

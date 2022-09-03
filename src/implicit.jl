@@ -2,19 +2,6 @@ using ForwardDiff
 using ReverseDiff
 using ChainRulesCore
 
-# ---------- Structs ---------
-
-"""
-    ImplicitFunction(solver, residual)
-
-Provide residual function: `r = residual(x, y)`
-and corresponding solve function: `y = solve(x)`
-"""
-struct ImplicitFunction{S, R}
-    solve::S
-    residual::R
-end
-
 
 # ------- Unpack/Pack ForwardDiff Dual ------
 """
@@ -33,77 +20,90 @@ pack_dual(yv::AbstractFloat, dy, T) = ForwardDiff.Dual{T}(yv, ForwardDiff.Partia
 pack_dual(yv::AbstractVector, dy, T) = ForwardDiff.Dual{T}.(yv, ForwardDiff.Partials.(Tuple.(eachrow(dy))))
 
 
+# --------- partial derivatives ---------
+"""
+    forward_ad_partials(residual, x, y)
+
+Default is to use ForwardDiff for partials
+"""
+function forward_ad_partials(residual, x, y)
+    ry(ytilde) = residual(x, ytilde)
+    rx(xtilde) = residual(xtilde, y)
+    A = ForwardDiff.jacobian(ry, y)  # TODO: cached version
+    B = ForwardDiff.jacobian(rx, x)
+    return A, B
+end
+
+# --------- linear solve ----------
+"""
+    default_linear_solve(A, b)
+
+standard linear solver
+"""
+default_linear_solve(A, b) = A\b
+
+
 
 # ---------- Overloaded functions for implicit ---------
 
 """
-    implicit(x)
+    solve_implicit(solve, residual, x, partials=forward_ad_partials, linearsolve=default_linear_solve)
 
-Functor, if not dual numbers, just solve normally.
+default to forward AD for partials, and standard linear solve
 """
-# (implicit::ImplicitFunction)(x) = implicit.solve(x)
-solve_implicit(implicit, x) = implicit.solve(x)
+solve_implicit(solve, residual, x, partials=forward_ad_partials, linearsolve=default_linear_solve) = solve_implicit(solve, residual, x, partials, linearsolve)
 
 
-"""
-    implicit(x)
 
-Functor overload for ForwardDiff inputs, providing exact derivatives using 
-Jacobian vector product.
-"""
-# function (implicit::ImplicitFunction)(x::Vector{<:ForwardDiff.Dual{T}}) where {T}
-function solve_implicit(implicit, x::Vector{<:ForwardDiff.Dual{T}}) where {T}
+# If no AD, just solve normally.
+solve_implicit(solve, residual, x, partials, linearsolve) = solve(x)
+
+
+
+# Overloaded for ForwardDiff inputs, providing exact derivatives using 
+# Jacobian vector product.
+function solve_implicit(solve, residual, x::Vector{<:ForwardDiff.Dual{T}}, partials, linearsolve) where {T}
 
     # unpack dual numbers
     xv, dx = unpack_dual(x) 
     
     # evalute solvers
-    yv = implicit(xv)
+    yv = solve(xv)
     
     # compute residual partial derivative matrices
-    ry(ytilde) = implicit.residual(xv, ytilde)
-    rx(xtilde) = implicit.residual(xtilde, yv)
-
-    A = ForwardDiff.jacobian(ry, yv)  # computing partials with ForwardDiff (could use other methods)
-    B = ForwardDiff.jacobian(rx, xv)
+    A, B = partials(residual, xv, yv)
 
     # solve for Jacobian-vector product
     b = -B * dx  
-    dy = A \ b
+    dy = linearsolve(A, b)
 
     # repack in ForwardDiff Dual
     return pack_dual(yv, dy, T)
 end
 
 
-# function ChainRulesCore.rrule(implicit::typeof(ImplicitFunction), x)
-function ChainRulesCore.rrule(::typeof(solve_implicit), implicit, x)
+# Provide a ChainRule rule for reverse mode
+function ChainRulesCore.rrule(::typeof(solve_implicit), solve, residual, x, partials, linearsolve)
     println("rule defined")
 
     # evalute solvers
-    y = implicit(x)
+    y = solve(x)
 
     # compute residual partial derivative matrices
-    ry(ytilde) = implicit.residual(x, ytilde)
-    rx(xtilde) = implicit.residual(xtilde, y)
-
-    A = ForwardDiff.jacobian(ry, y)  # computing partials with ForwardDiff (could use other methods)
-    B = ForwardDiff.jacobian(rx, x)
+    A, B = partials(residual, x, y)
 
     function implicit_pullback(dy)
-        println("calling pullback")
-        u = transpose(A) \ dy
+        u = linearsolve(transpose(A), dy)
         dx = -transpose(B) * u
-        return NoTangent(), NoTangent(), dx
+        return NoTangent(), NoTangent(), NoTangent(), dx, NoTangent(), NoTangent()
     end
 
     return y, implicit_pullback
 end
 
-ReverseDiff.@grad_from_chainrules solve_implicit(implicit, x::TrackedArray)
 
-
-
+# register above rule for ReverseDiff
+ReverseDiff.@grad_from_chainrules solve_implicit(solve, residual, x::TrackedArray, partials, linearsolve)
 
 
 # ----- example --------
@@ -134,8 +134,7 @@ end
 
 function lin_overload(x)
     y1 = 2.0*x
-    lin_imp = ImplicitFunction(lin_solver, lin_residual)
-    y2 = solve_implicit(lin_imp, y1)
+    y2 = solve_implicit(lin_solver, lin_residual, y1)
     z = 2.0*y2
     return z
 end

@@ -20,49 +20,156 @@ pack_dual(yv::AbstractFloat, dy, T) = ForwardDiff.Dual{T}(yv, ForwardDiff.Partia
 pack_dual(yv::AbstractVector, dy, T) = ForwardDiff.Dual{T}.(yv, ForwardDiff.Partials.(Tuple.(eachrow(dy))))
 
 
-# --------- partial derivatives ---------
-"""
-    forward_ad_partials(residual, x, y)
+# # --------- customization options for efficiency ---------
+struct ImpFuncOptions{T1, T2, T3, T4, T5}
+    drdy::T1  # function to compute A = dr/dy
+    linsolve::T2  # function to solve A x = b for some provided b
+    tlinsolve::T3  # function to solve A^T x = b for some provided b
+    jvp::T4  # function to compute jacobian vector product B v for some provided v where B = dr/dx
+    vjp::T5  # function to compute vector jacobian product v' * B for some provided v where B = dr/dx
+end
 
-Default is to use ForwardDiff for partials
+ImpFuncOptions() = ImpFuncOptions(forward_partial_y, default_linear_solve, default_transpose_linear_solve, forwardJVP, reverseVJP)
+
+# ------ compute dr/dy ------------
 """
-function forward_ad_partials(residual, x, y)
+    drdy(residual, x, y)
+
+residual(x, y) is a function where x is the input and y is the output 
+from solving the implicit function where r = residual(x, y) = 0.
+User can provide own implementations of drdy.  It must return
+A_{ij} = dr_i/dy_j where r are the residuals and y are the states.
+Can optionally provide a factorization for A.
+"""
+function drdy(residual, x, y) end  # just for documentation
+
+"""
+Use forward AD to compute partials.
+"""
+function forward_partial_y(residual, x, y)
+    # evaluate partial derivatives with ForwardDiff
     ry(ytilde) = residual(x, ytilde)
-    rx(xtilde) = residual(xtilde, y)
     A = ForwardDiff.jacobian(ry, y)  # TODO: cached version
-    B = ForwardDiff.jacobian(rx, x)
-    return A, B
+    return A
+end
+
+"""
+Use reverse AD to compute partials.
+"""
+function reverse_partial_y(residual, x, y)
+    # evaluate partial derivatives with ForwardDiff
+    ry(ytilde) = residual(x, ytilde)
+    A = ReverseDiff.jacobian(ry, y)  # TODO: cached version
+    return A
 end
 
 # --------- linear solve ----------
 """
-    default_linear_solve(A, b)
+    linear_solve(A, b)
 
-standard linear solver
+Solve the linear system Ax = b for x where A is the partial derivatives
+from drdy (which presumably you have used a custom implementation for if you are replacing this method).
+b is some vector that will be input.
 """
-default_linear_solve(A, b) = A\b
+function linear_solve(A, b) end  # just for documentation
+
+"""
+    transpose_linear_solve(A, b)
+
+Solve the linear system A^T x = b for x where A is the partial derivatives
+from drdy.  Note that a factorization for A will be provided not A^T so you will want to use a matrix right division.
+"""
+function transpose_linear_solve(A, b) end  # just for documentation
 
 
+default_linear_solve(A, b) = A \ b
+default_transpose_linear_solve(A, b) = (b' / A)'
 
-# ---------- Overloaded functions for implicit ---------
+
+# ------ compute dr/dx * v (JVP)  or v^T dr/dx  (VJP) ---------
+
+"""
+    jvp(residual, x, y, v)
+
+Return Jacobian vector product: B * v
+where B_ij = dr_i/dx_j.  
+"""
+function jvp(residual, x, y, v) end  # just for documentation
+
+"""
+    vjp(residual, x, y, v)
+
+Return vector Jacobian product: v^T * B
+where B_ij = dr_i/dx_j.  
+"""
+function vjp(residual, x, y, v) end  # just for documentation
+
+
+struct FJVPTag end
+
+"""
+seed forward mode AD with dx to compute Jacobian vector product without ever forming the Jacobian.
+"""
+function forwardJVP(residual, x, y, v)
+    # create new seed using v
+    xd = pack_dual(x, v, FJVPTag)
+    
+    # evaluate residual function
+    rd = residual(xd, y)  # constant y
+    
+    # extract partials
+    _, dr = unpack_dual(rd) 
+    
+    return dr
+end
+
+"""
+Form Jacobian with forward AD then multiply
+"""
+function forward_post_multiply(residual, x, y, v)
+    rx(xtilde) = residual(xtilde, y)
+    B = ForwardDiff.jacobian(rx, x)
+    return B * v
+end
+
+"""
+seed reverse mode AD with dr to compute vector-Jacobian-product without ever forming the Jacobian.
+"""
+function reverseVJP(residual, x, y, v)
+    wrapper(xtilde) = v'*residual(xtilde, y)  # instead of using underlying functions in ReverseDiff just differentiate v^T * r with respect to x to get v^T * dr/dx
+    dx = ReverseDiff.gradient(wrapper, x)
+    return dx
+end
+
+"""
+Form Jacobian with forward AD then pre-multiply
+"""
+function forward_pre_multiply(residual, x, y, v)
+    rx(xtilde) = residual(xtilde, y)
+    B = ForwardDiff.jacobian(rx, x)
+    return v' * B
+end
+
+
+# ---------- Overloaded functions for solve_implicit ---------
 
 """
     solve_implicit(solve, residual, x, partials=forward_ad_partials, linearsolve=default_linear_solve)
 
 default to forward AD for partials, and standard linear solve
 """
-solve_implicit(solve, residual, x, partials=forward_ad_partials, linearsolve=default_linear_solve) = solve_implicit(solve, residual, x, partials, linearsolve)
+solve_implicit(solve, residual, x, options=ImpFuncOptions()) = solve_implicit(solve, residual, x, options)
 
 
 
 # If no AD, just solve normally.
-solve_implicit(solve, residual, x, partials, linearsolve) = solve(x)
+solve_implicit(solve, residual, x, options) = solve(x)
 
 
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using 
 # Jacobian vector product.
-function solve_implicit(solve, residual, x::Vector{<:ForwardDiff.Dual{T}}, partials, linearsolve) where {T}
+function solve_implicit(solve, residual, x::Vector{<:ForwardDiff.Dual{T}}, options) where {T}
 
     # unpack dual numbers
     xv, dx = unpack_dual(x) 
@@ -70,12 +177,10 @@ function solve_implicit(solve, residual, x::Vector{<:ForwardDiff.Dual{T}}, parti
     # evalute solvers
     yv = solve(xv)
     
-    # compute residual partial derivative matrices
-    A, B = partials(residual, xv, yv)
-
     # solve for Jacobian-vector product
-    b = -B * dx  
-    dy = linearsolve(A, b)
+    b = options.jvp(residual, xv, yv, -dx)
+    A = options.drdy(residual, xv, yv)
+    dy = options.linsolve(A, b)
 
     # repack in ForwardDiff Dual
     return pack_dual(yv, dy, T)
@@ -83,19 +188,18 @@ end
 
 
 # Provide a ChainRule rule for reverse mode
-function ChainRulesCore.rrule(::typeof(solve_implicit), solve, residual, x, partials, linearsolve)
+function ChainRulesCore.rrule(::typeof(solve_implicit), solve, residual, x, options)
     println("rule defined")
 
     # evalute solvers
     y = solve(x)
 
-    # compute residual partial derivative matrices
-    A, B = partials(residual, x, y)
+    A = options.drdy(residual, x, y)
 
     function implicit_pullback(dy)
-        u = linearsolve(transpose(A), dy)
-        dx = -transpose(B) * u
-        return NoTangent(), NoTangent(), NoTangent(), dx, NoTangent(), NoTangent()
+        u = options.tlinsolve(A, dy)
+        dx = options.vjp(residual, x, y, -u)
+        return NoTangent(), NoTangent(), NoTangent(), dx, NoTangent()
     end
 
     return y, implicit_pullback
@@ -103,7 +207,7 @@ end
 
 
 # register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules solve_implicit(solve, residual, x::TrackedArray, partials, linearsolve)
+ReverseDiff.@grad_from_chainrules solve_implicit(solve, residual, x::TrackedArray, options)
 
 
 # ----- example --------

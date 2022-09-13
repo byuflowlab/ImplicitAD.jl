@@ -4,6 +4,8 @@ using NLsolve
 using ForwardDiff
 using ReverseDiff
 using FiniteDiff
+using LinearAlgebra: Symmetric, factorize
+using SparseArrays: sparse
 
 @testset "residual" begin
     
@@ -75,8 +77,6 @@ end
 
 @testset "linear" begin
     
-    using LinearAlgebra: Symmetric, factorize
-    using SparseArrays: sparse
 
     function solvelin(x)
         A = [x[1]*x[2] x[3]+x[4];

@@ -4,7 +4,7 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/dev/)
 [![Build Status](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-## Theory
+## Introduction
 
 Many engineering analyses use implicit functions.  We can represent any such implicit function generally as:
 ```math
@@ -14,7 +14,49 @@ where $r$ are the residual functions we wish to drive to zero, $x$ are inputs, a
 
 x --> [ r(x, y) ] --> y
 
-From a differentiation perspective, we would like to compute $dy/dx$.  One can often use algorithmic differentiation (AD) in the same way one would for any explicit function.  Once we unroll the iterations of the solver the set of instructions is explicit.  However, this is at best inefficient and at worse inaccurate or not possible (at least not without a lot more effort).  To obtain accurate derivatives by propgating AD through a solver, the solver must be solved to a tight tolerance.  Generally tighter than is required to converge the primal values.  Sometimes this is not feasible.  Additionally, many operations inside the solvers are not overloaded for AD, this is especially true if calling solvers in other languages.  But even if we can do it (tight convergence is possible and everything under the hood is overloaded) we usually still shouldn't do it, as it would be computationally inefficient.  
+From a differentiation perspective, we would like to compute $dy/dx$.  One can often use algorithmic differentiation (AD) in the same way one would for any explicit function.  Once we unroll the iterations of the solver the set of instructions is explicit.  However, this is at best inefficient and at worse inaccurate or not possible (at least not without a lot more effort).  To obtain accurate derivatives by propgating AD through a solver, the solver must be solved to a tight tolerance.  Generally tighter than is required to converge the primal values.  Sometimes this is not feasible.  Additionally, many operations inside the solvers are not overloaded for AD, this is especially true if calling solvers in other languages.  But even if we can do it (tight convergence is possible and everything under the hood is overloaded) we usually still shouldn't do it, as it would be computationally inefficient.  Instead we can use implicit differentiation, and pass the resulting partials back in the midst of an AD chain, to allow for AD to work seemlessly with implicit functions without having to differentiate through them.
+
+
+## Usage
+
+We can generically represent the solver that converges the residuals and computes the corresponding state variables as:
+
+``y = solve(x)``
+
+Our larger code may then have a mix of explicit and implicit functions
+
+```julia
+function example(a)
+    b = 2*a
+    x = @. exp(b) + a
+    y = solve(x)
+    z = sqrt.(y)
+    return z
+end
+```
+
+To make this function compatible we only need to replace the call to ``solve`` with an overloaded function ``implicit_function`` defined in this module:
+```julia
+using ImplicitAD
+
+function example(a)
+    b = 2*a
+    x = @. exp(b) + a
+    y = implicit_function(solve, residual, x)
+    z = sqrt.(y)
+    return z
+end
+```
+Note that we must provide the solve function: ``y = solve(x)`` and also the residual function: ``r = residual(x, y)``.  The resulting code is now compatible with `ForwardDiff` or `ReverseDiff`, computes the derivatives correctly, and without wasteful AD propgation inside the solver.  This approach will work with any solver, and the implementation of the solver need not be AD compatible since AD does not occur internal to the solver.
+
+If one or both of the partial derivative Jacobians: $\partial r / \partial y$ and $\partial r / \partial x$ is known, then the user can specify those with the keywords arguments `drdy=drdy` and `drdx=drdx` where the function of the form `∂r_i/∂y_j = drdy(x, y)` (same for drdx).
+
+Internally, the package computes Jacobian-vector products (or vector-Jacobian products for reverse mode) and assumes dense partial derivatives.  However, the user can overload any of the `jvp`, `vjp`, `computeA`, and `lsolve`, `tlsolve` functions for cases where: memory is preallocated, sparsity is significant, specific linear factorizations or specific linear solvers would be more efficient.
+
+## Theory
+
+
+
 
 We can get to the derivatives we are after by using implicit differentiation. Recall that we are solving:
 $r(x, y(x)) = 0$ and that we want $dy/dx$.  Using the chain rule we find that:

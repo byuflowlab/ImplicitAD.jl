@@ -1,6 +1,18 @@
+module ImplicitAD
+
 using ForwardDiff
 using ReverseDiff
 using ChainRulesCore
+
+# main function
+export implicit_function
+
+# may overload
+export jvp, vjp, computeA, lsolve, tlsolve
+
+
+
+# ---------------------------------------------------------------------------
 
 # ------- Unpack/Pack ForwardDiff Dual ------
 """
@@ -155,108 +167,4 @@ end
 # register above rule for ReverseDiff
 ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::TrackedArray, drdy, drdx)
 
-
-# ----- example --------
-
-using NLsolve
-using FiniteDiff
-
-function residual(x, y)
-    T = promote_type(eltype(x), eltype(y))
-    r = zeros(T, 2)
-    r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
-    r[2] = sin(y[2]*exp(y[1])-1)*x[4]
-    return r
 end
-
-function solve(x)
-    rwrap(y) = residual(x[1:4], y)
-    res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
-    return res.zero
-end
-
-function drdy(x, y)
-    A = zeros(2, 2)
-    A[1, 1] = y[2]^3-x[2]
-    A[1, 2] = 3*y[2]^2*(y[1]+x[1])
-    u = exp(y[1])*cos(y[2]*exp(y[1])-1)*x[4]
-    A[2, 1] = y[2]*u
-    A[2, 2] = u
-    return A
-end
-
-function program(x)
-    z = 2.0*x
-    w = z + x.^2
-    y = solve(w)
-    return y[1] .+ w*y[2]
-end
-
-function modprogram(x)
-    z = 2.0*x
-    w = z + x.^2
-    y = implicit_function(solve, residual, w)
-    return y[1] .+ w*y[2]
-end
-
-function modprogram2(x)
-    z = 2.0*x
-    w = z + x.^2
-    y = implicit_function(solve, residual, w, drdy=drdy)
-    return y[1] .+ w*y[2]
-end
-
-x = [1.0; 2.0; 3.0; 4.0; 5.0]
-program(x)
-modprogram(x)
-
-J1 = FiniteDiff.finite_difference_jacobian(program, x)
-J2 = ForwardDiff.jacobian(modprogram, x)
-J3 = ReverseDiff.jacobian(modprogram, x)
-J4 = ForwardDiff.jacobian(modprogram2, x)
-J5 = ReverseDiff.jacobian(modprogram2, x)
-
-println(maximum(abs.(J1 - J2)))
-println(maximum(abs.(J2 - J3)))
-println(maximum(abs.(J2 - J4)))
-println(maximum(abs.(J2 - J5)))
-
-using LinearAlgebra: Symmetric, factorize
-using SparseArrays: sparse
-function test3(x)
-    A = [x[1]*x[2] x[3]+x[4];
-        x[3]+x[4] 0.0]
-    b = [2.0, 3.0]
-    Af = factorize(Symmetric(sparse(A)))
-    w = Af\b
-    return 2*w
-end
-
-function solvelin(x)
-    A = [x[1]*x[2] x[3]+x[4];
-        x[3]+x[4] 0.0]
-    b = [2.0, 3.0]
-    Af = factorize(Symmetric(sparse(A)))
-    return Af \ b
-end
-
-function Alin(x, y)
-    return [x[1]*x[2] x[3]+x[4];
-        x[3]+x[4] 0.0]
-end
-
-# r = A * y - b
-# drdx = dAdx * y
-function Blin(x, y)
-    B = [x[2]*y[1]  x[1]*y[1]  y[2]  y[2];
-         0.0  0.0  y[1]  y[1]]
-    return B
-end
-
-function test4(x)
-    w = implicit_function(solvelin, nothing, x, drdy=Alin, drdx=Blin)
-    return 2*w
-end
-
-ForwardDiff.jacobian(test4, [1.0, 2.0, 3.0, 4.0])
-FiniteDiff.finite_difference_jacobian(test4, [1.0, 2.0, 3.0, 4.0])

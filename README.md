@@ -51,7 +51,9 @@ Note that we must provide the solve function: ``y = solve(x)`` and also the resi
 
 If one or both of the partial derivative Jacobians: $\partial r / \partial y$ and $\partial r / \partial x$ is known, then the user can specify those with the keywords arguments `drdy=drdy` and `drdx=drdx` where the function of the form `∂r_i/∂y_j = drdy(x, y)` (same for drdx).
 
-Internally, the package computes Jacobian-vector products (or vector-Jacobian products for reverse mode) and assumes dense partial derivatives.  However, the user can overload any of the `jvp`, `vjp`, `computeA`, and `lsolve`, `tlsolve` functions for cases where: memory is preallocated, sparsity is significant, specific linear factorizations or specific linear solvers would be more efficient.
+Internally, the package computes Jacobian-vector products (or vector-Jacobian products for reverse mode) and assumes dense partial derivatives.  However, the user can overload any of the `jvp`, `vjp`, `computeA`, and `lsolve`, `tlsolve` functions for cases where: memory is preallocated, sparsity is significant, or specific linear factorizations or specific linear solvers would be more efficient.
+
+See the unit tests for a few examples.
 
 ## Theory
 

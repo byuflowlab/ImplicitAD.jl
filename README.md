@@ -18,6 +18,7 @@ From a differentiation perspective, we would like to compute $dy/dx$.  One can o
 
 This methodology is not new.  But our past usage has always been manual, as a one-off solution.  This package generalizes the implementation so that a simple one-line change can be applied to allow AD to be propgated around any solver.  Note that the implementation of the solver need not be AD compatible since AD does not not occur inside the solver.  This package is overloaded for [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) and [ReverseDiff.jl](https://github.com/JuliaDiff/ReverseDiff.jl).  The package [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) can be used for other AD packages that rely on ChainRules (like Zygote).  [NonconvexUtils.jl](https://github.com/JuliaNonconvex/NonconvexUtils.jl) is part of a much larger package with various optimization and AD capabilities, with extensive support for AD of implicit functions.  Our package targets maximal simplicity in usage and readability (for the types of problems we most often encounter), with hooks to allow for things like preallocation, sparsity, and matrix-free linear solvers when needed.
 
+When defining custom rules with ReverseDiff (which this package does), you can no longer compile the tape if you want correct outputs.  See this issue in ReverseDiff: https://github.com/JuliaDiff/ReverseDiff.jl/issues/187
 
 ## Usage
 

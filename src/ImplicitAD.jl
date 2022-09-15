@@ -123,7 +123,7 @@ implicit_function(solve, residual, x, drdy, drdx) = solve(x)
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using 
 # Jacobian vector product.
-function implicit_function(solve, residual, x::Vector{<:ForwardDiff.Dual{T}}, drdy, drdx) where {T}
+function implicit_function(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, drdy, drdx) where {T}
 
     # unpack dual numbers
     xv, dx = unpack_dual(x) 
@@ -166,5 +166,6 @@ end
 
 # register above rule for ReverseDiff
 ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::TrackedArray, drdy, drdx)
+ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::AbstractVector{<:TrackedReal}, drdy, drdx)
 
 end

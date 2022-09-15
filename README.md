@@ -16,6 +16,8 @@ x --> [ r(x, y) ] --> y
 
 From a differentiation perspective, we would like to compute $dy/dx$.  One can often use algorithmic differentiation (AD) in the same way one would for any explicit function.  Once we unroll the iterations of the solver the set of instructions is explicit.  However, this is at best inefficient and at worse inaccurate or not possible (at least not without a lot more effort).  To obtain accurate derivatives by propgating AD through a solver, the solver must be solved to a tight tolerance.  Generally tighter than is required to converge the primal values.  Sometimes this is not feasible.  Additionally, many operations inside the solvers are not overloaded for AD, this is especially true if calling solvers in other languages.  But even if we can do it (tight convergence is possible and everything under the hood is overloaded) we usually still shouldn't do it, as it would be computationally inefficient.  Instead we can use implicit differentiation, and pass the resulting partials back in the midst of an AD chain, to allow for AD to work seemlessly with implicit functions without having to differentiate through them.
 
+This methodology is not new.  But our past usage has always been manual, as a one-off solution.  This package generalizes the implementation so that a simple one-line change can be applied to allow AD to be propgated around any solver.  Note that the implementation of the solver need not be AD compatible since AD does not not occur inside the solver.  This package is overloaded for `ForwardDiff.jl` and `ReverseDiff.jl`.  The package [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) can be used for other AD packages that rely on ChainRules (like Zygote).  
+
 
 ## Usage
 
@@ -47,18 +49,13 @@ function example(a)
     return z
 end
 ```
-Note that we must provide the solve function: ``y = solve(x)`` and also the residual function: ``r = residual(x, y)``.  The resulting code is now compatible with `ForwardDiff` or `ReverseDiff`, computes the derivatives correctly, and without wasteful AD propgation inside the solver.  This approach will work with any solver, and the implementation of the solver need not be AD compatible since AD does not occur internal to the solver.
-
-If one or both of the partial derivative Jacobians: $\partial r / \partial y$ and $\partial r / \partial x$ is known, then the user can specify those with the keywords arguments `drdy=drdy` and `drdx=drdx` where the function of the form `∂r_i/∂y_j = drdy(x, y)` (same for drdx).
+Note that the only new piece of information we need to expose is the residual function: ``r = residual(x, y)``, so that partial derivatives can be computed.  If one or both of the partial derivative Jacobians: $\partial r / \partial y$ and $\partial r / \partial x$ is known, then the user can specify those with the keywords arguments `drdy=drdy` and `drdx=drdx` where the function of the form `∂r_i/∂y_j = drdy(x, y)` (same for drdx).
 
 Internally, the package computes Jacobian-vector products (or vector-Jacobian products for reverse mode) and assumes dense partial derivatives.  However, the user can overload any of the `jvp`, `vjp`, `computeA`, and `lsolve`, `tlsolve` functions for cases where: memory is preallocated, sparsity is significant, or specific linear factorizations or specific linear solvers would be more efficient.
 
 See the unit tests for a few examples.
 
 ## Theory
-
-
-
 
 We can get to the derivatives we are after by using implicit differentiation. Recall that we are solving:
 $r(x, y(x)) = 0$ and that we want $dy/dx$.  Using the chain rule we find that:

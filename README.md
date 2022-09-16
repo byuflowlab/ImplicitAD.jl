@@ -50,11 +50,9 @@ function example(a)
     return z
 end
 ```
-Note that the only new piece of information we need to expose is the residual function: ``r = residual(x, y)``, so that partial derivatives can be computed.  If one or both of the partial derivative Jacobians: $\partial r / \partial y$ and $\partial r / \partial x$ is known, then the user can specify those with the keywords arguments `drdy=drdy` and `drdx=drdx` where the function of the form `∂r_i/∂y_j = drdy(x, y)` (same for drdx).
+Note that the only new piece of information we need to expose is the residual function: ``r = residual(x, y)``, so that partial derivatives can be computed.  
 
-Internally, the package computes Jacobian-vector products (or vector-Jacobian products for reverse mode) and assumes dense partial derivatives.  However, the user can overload any of the `jvp`, `vjp`, `computeA`, and `lsolve`, `tlsolve` functions for cases where: memory is preallocated, sparsity is significant, or specific linear factorizations or specific linear solvers would be more efficient.
-
-See the unit tests for a few examples.
+Internally, the package computes Jacobian-vector products (or vector-Jacobian products for reverse mode) and assumes dense partial derivatives.  However, the user can provide their own functions, as keyword arguments for the Jacobian vector product (`jvp`), vector Jacobian product (`vjp`), partial derivatives (`drdy` and `drdx`), and linear (and transpose linear) solvers (`lsolve` and `tlsolve`).  The unit tests show a few examples where the user can provide their own Jacobians, or where some of the functions are overloaded to use preallocated arrays.
 
 ## Theory
 

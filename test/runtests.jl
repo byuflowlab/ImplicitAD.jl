@@ -48,7 +48,7 @@ using SparseArrays: sparse
 
     # -------- supply one of the jacobians -----------
 
-    function drdy(x, y)
+    function drdy(residual, x, y)
         A = zeros(2, 2)
         A[1, 1] = y[2]^3-x[2]
         A[1, 2] = 3*y[2]^2*(y[1]+x[1])
@@ -86,14 +86,14 @@ end
         return Af \ b
     end
 
-    function Alin(x, y)
+    function Alin(residual, x, y)
         return [x[1]*x[2] x[3]+x[4];
             x[3]+x[4] 0.0]
     end
 
     # r = A * y - b
     # drdx = dAdx * y
-    function Blin(x, y)
+    function Blin(residual, x, y)
         B = [x[2]*y[1]  x[1]*y[1]  y[2]  y[2];
             0.0  0.0  y[1]  y[1]]
         return B
@@ -133,56 +133,52 @@ end
         y = solve(w)
         return y[1] .+ w*y[2]
     end
-    
-    function modprogram(data, x)
-        z = 2.0*x
-        w = z + x.^2
-        y = implicit_function(solve, data, w)
-        return y[1] .+ w*y[2]
-    end
-
-    
+       
    
-    struct MyData{FUN, VD, VF, MF}
-        residual::FUN
-        rd::VD
-        r::VF
-        A::MF
-    end
+    struct MyData end
 
-    function ImplicitAD.jvp(data::MyData{T1, T2, T3, T4}, x, y, v, drdx) where {T1, T2, T3, T4}
+    function myjvp(residual, x, y, v, rd)
         println("here")
 
         # dual
         xd = ImplicitAD.pack_dual(x, v, MyData)
         
         # evaluate residual function
-        data.residual(data.rd, xd, y)  # constant y
+        residual(rd, xd, y)  # constant y
         
         # extract partials
-        _, b = ImplicitAD.unpack_dual(data.rd) 
+        _, b = ImplicitAD.unpack_dual(rd) 
 
         return b
     end
 
-    function ImplicitAD.computeA(data::MyData, x, y, drdy)
-        println("there")
+    function mydrdy(x, y, A, r)
 
         wrap!(rt, yt) = residual(rt, x, yt)
    
-        ForwardDiff.jacobian!(data.A, wrap!, data.r, y)    
+        ForwardDiff.jacobian!(A, wrap!, r, y)    
 
-        return data.A
+        return A
     end
+
+    function modprogram(x, jvp, drdy)
+        z = 2.0*x
+        w = z + x.^2
+        y = implicit_function(solve, residual, w, jvp=jvp, drdy=drdy)
+        return y[1] .+ w*y[2]
+    end
+
 
     function run()
         
         rd = zeros(ForwardDiff.Dual{MyData}, 2)
         r = zeros(2)
         A = zeros(2, 2)
-        data = MyData(residual, rd, r, A)
 
-        wrap(x) = modprogram(data, x)
+        jvp(residual, x, y, v) = myjvp(residual, x, y, v, rd)
+        drdy(residual, x, y) = mydrdy(x, y, A, r)
+
+        wrap(x) = modprogram(x, jvp, drdy)
         
         x = [1.0; 2.0; 3.0; 4.0; 5.0]
         J1 = ForwardDiff.jacobian(wrap, x)  # can now change x and compute more while data stays allocated.

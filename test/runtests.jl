@@ -138,7 +138,7 @@ end
     struct MyData end
 
     function myjvp(residual, x, y, v, rd)
-        println("here")
+        # println("here")
 
         # dual
         xd = ImplicitAD.pack_dual(x, v, MyData)
@@ -194,7 +194,7 @@ end
 
 end
 
-@testset "linear" begin
+@testset "linear2" begin
 
     function test(a)
         A = a[1]*[1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]

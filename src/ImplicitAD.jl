@@ -13,14 +13,14 @@ export implicit_function, implicit_linear_function
 
 # ------- Unpack/Pack ForwardDiff Dual ------
 
-fd_primal(x) = ForwardDiff.value.(x)
+fd_value(x) = ForwardDiff.value.(x)
 fd_partials(x) = reduce(vcat, transpose.(ForwardDiff.partials.(x)))
 
 """
 unpack ForwardDiff Dual return value and derivative.
 """
 function unpack_dual(x) 
-    xv = fd_primal(x)
+    xv = fd_value(x)
     dx = fd_partials(x)
     return xv, dx
 end
@@ -197,66 +197,39 @@ ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::Abstract
 
 implicit_linear_function(A, b; lsolve=linear_solve, fact=factorize) = implicit_linear_function(A, b, lsolve, fact)
 
+
 # If no AD, just solve normally.
 implicit_linear_function(A, b, lsolve, fact) = lsolve(A, b)
 
+# catch three cases where one or both contain duals
+implicit_linear_function(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
+implicit_linear_function(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
+implicit_linear_function(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
+
+
 # Both A and b contain duals
-function linear_dual(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T}
+function linear_dual(A, b, lsolve, fact, T)
     
     # unpack dual numbers
-    Av = fd_primal(A)
+    Av = fd_value(A)
+    bv = fd_value(b)
+
+    # save factorization since we will do two linear solves
     Af = fact(Av)
-    bv, db = unpack_dual(b) 
     
     # evalute solver
     yv = lsolve(Af, bv)
     
-    # extract Partials of Adot * y  (since y does not contain duals we extract partials of A*y)
-    dAy = fd_partials(A*yv)
+    # extract Partials of (b - A * y)  i.e., bdot - Adot * y  (since y does not contain duals)
+    rhs = fd_partials(b - A*yv)
     
     # solve for new derivatives
-    dy = lsolve(Af, db - dAy)
+    dy = lsolve(Af, rhs)
 
     # repack in ForwardDiff Dual
     return pack_dual(yv, dy, T)
 end
 
 
-# b is constant
-function linear_dual(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, fact) where {T}
-    
-    # unpack dual numbers
-    Av = fd_primal(A)
-    Af = fact(Av)
-    
-    # evalute solver
-    yv = lsolve(Af, b)
-    
-    # extract Partials of Adot * y  (since y does not contain duals we extract partials of A*y)
-    dAy = fd_partials(A*yv)
-    
-    # solve for new derivatives
-    dy = lsolve(Af, -dAy)
-
-    # repack in ForwardDiff Dual
-    return pack_dual(yv, dy, T)
-end
-
-# A is constant
-function linear_dual(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T}
-    
-    # unpack dual numbers
-    Af = fact(A)
-    bv, db = unpack_dual(b) 
-    
-    # evalute solver
-    yv = lsolve(Af, bv)
-
-    # solve for new derivatives
-    dy = lsolve(Af, db)
-
-    # repack in ForwardDiff Dual
-    return pack_dual(yv, dy, T)
-end
 
 end

@@ -193,3 +193,33 @@ end
     @test all(isapprox.(J1, J2, atol=2e-6))
 
 end
+
+@testset "linear" begin
+
+    function test(a)
+        A = a[1]*[1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]
+        b = 2.0 * a[2:4]
+        x = implicit_linear_function(A, b)
+        z = 2*x
+        return z
+    end
+
+    function test2(a)
+        A = [1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]
+        b = 2.0 * a[2:4]
+        x = implicit_linear_function(A, b)
+        z = 2*x
+        return z
+    end
+
+    function test3(a)
+        A = a[1] * [1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]
+        b = 2.0 * ones(3)
+        x = implicit_linear_function(A, b)
+        z = 2*x
+        return z
+    end
+
+a = [1.2, 2.3, 3.1, 4.3]
+ForwardDiff.jacobian(test, a)
+FiniteDiff.finite_difference_jacobian(test, a)

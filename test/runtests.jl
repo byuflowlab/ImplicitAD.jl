@@ -220,6 +220,19 @@ end
         return z
     end
 
-a = [1.2, 2.3, 3.1, 4.3]
-ForwardDiff.jacobian(test, a)
-FiniteDiff.finite_difference_jacobian(test, a)
+    a = [1.2, 2.3, 3.1, 4.3]
+    J1 = ForwardDiff.jacobian(test, a)
+    J2 = FiniteDiff.finite_difference_jacobian(test, a, Val{:central})
+
+    @test all(isapprox.(J1, J2, atol=1e-6))
+
+    J1 = ForwardDiff.jacobian(test2, a)
+    J2 = FiniteDiff.finite_difference_jacobian(test2, a, Val{:central})
+
+    @test all(isapprox.(J1, J2, atol=2e-6))
+
+    J1 = ForwardDiff.jacobian(test3, a)
+    J2 = FiniteDiff.finite_difference_jacobian(test3, a, Val{:central})
+
+    @test all(isapprox.(J1, J2, atol=2e-6))
+end

@@ -10,16 +10,14 @@ using SparseArrays: sparse
 @testset "residual" begin
     
 
-    function residual(x, y)
-        T = promote_type(eltype(x), eltype(y))
-        r = zeros(T, 2)
+    function residual!(r, x, y)
         r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
         r[2] = sin(y[2]*exp(y[1])-1)*x[4]
         return r
     end
 
     function solve(x)
-        rwrap(y) = residual(x[1:4], y)
+        rwrap(r, y) = residual!(r, x[1:4], y)
         res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
         return res.zero
     end
@@ -34,7 +32,7 @@ using SparseArrays: sparse
     function modprogram(x)
         z = 2.0*x
         w = z + x.^2
-        y = implicit_function(solve, residual, w)
+        y = implicit_function(solve, residual!, w)
         return y[1] .+ w*y[2]
     end
 
@@ -61,7 +59,7 @@ using SparseArrays: sparse
     function modprogram2(x)
         z = 2.0*x
         w = z + x.^2
-        y = implicit_function(solve, residual, w, drdy=drdy)
+        y = implicit_function(solve, residual!, w, drdy=drdy)
         return y[1] .+ w*y[2]
     end
 
@@ -114,15 +112,14 @@ end
 
 @testset "overload" begin
 
-    function residual(r, x, y)
-        T = promote_type(eltype(x), eltype(y))
+    function residual!(r, x, y)
         r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
         r[2] = sin(y[2]*exp(y[1])-1)*x[4]
         return r
     end
 
     function solve(x)
-        rwrap(r, y) = residual(r, x[1:4], y)
+        rwrap(r, y) = residual!(r, x[1:4], y)
         res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
         return res.zero
     end
@@ -134,54 +131,35 @@ end
         return y[1] .+ w*y[2]
     end
        
-   
-    struct MyData end
-
-    function myjvp(residual, x, y, v, rd)
-        # println("here")
-
-        # dual
-        xd = ImplicitAD.pack_dual(x, v, MyData)
-        
-        # evaluate residual function
-        residual(rd, xd, y)  # constant y
-        
-        # extract partials
-        _, b = ImplicitAD.unpack_dual(rd) 
-
-        return b
-    end
 
     function mydrdy(x, y, A, r)
 
-        wrap!(rt, yt) = residual(rt, x, yt)
+        wrap!(rt, yt) = residual!(rt, x, yt)
    
         ForwardDiff.jacobian!(A, wrap!, r, y)    
 
         return A
     end
 
-    function modprogram(x, jvp, drdy)
+    function modprogram(x, drdy)
         z = 2.0*x
         w = z + x.^2
-        y = implicit_function(solve, residual, w, jvp=jvp, drdy=drdy)
+        y = implicit_function(solve, residual!, w, drdy=drdy)
         return y[1] .+ w*y[2]
     end
 
 
     function run()
         
-        rd = zeros(ForwardDiff.Dual{MyData}, 2)
         r = zeros(2)
         A = zeros(2, 2)
-
-        jvp(residual, x, y, v) = myjvp(residual, x, y, v, rd)
+ 
         drdy(residual, x, y) = mydrdy(x, y, A, r)
 
-        wrap(x) = modprogram(x, jvp, drdy)
+        wrap(x) = modprogram(x, drdy)
         
         x = [1.0; 2.0; 3.0; 4.0; 5.0]
-        J1 = ForwardDiff.jacobian(wrap, x)  # can now change x and compute more while data stays allocated.
+        J1 = ForwardDiff.jacobian(wrap, x)
         
         J2 = FiniteDiff.finite_difference_jacobian(wrap, x)
         

@@ -42,7 +42,6 @@ r_2(x, y) = \sin(y_2 \exp(y_1) - 1) x_4 = 0
 We will use the NLsolve package to solve these equations (refer to the first example in their documentation if not familiar with NLsolve).  We will also put explict operations before and after the solve just to show how this will work in the midst of a larger program.  
 
 ```@example basic
-
 using NLsolve
 
 function residual!(r, x, y)
@@ -68,7 +67,6 @@ nothing # hide
 Now if we tried to run `ForwardDiff.jacobian(program, x)` it will not work.  It's not compatible with the internals of NLSolve, but even if it were it would be an inefficient way to compute the derivatives.  We now need to modify this script to use our package.  Here is what the modified `program` function will look like.
 
 ```@example basic
-
 using ImplicitAD
 
 function modprogram(x)
@@ -133,7 +131,6 @@ nothing # hide
 We can now pass this function in with a keyword argument to replace the default implementation for this subfunction.
 
 ```@example basic
-
 function modprogram2(x)
     z = 2.0*x
     w = z + x.^2
@@ -201,4 +198,4 @@ println(maximum(abs.(J1 - J2)))
 For `implicit_linear_function` there are two keywords for custom subfunctions: 
 
 1) `lsolve(A, b)`: same purpose as before: solve ``A x = b`` where the default is the backslash operator.
-2) `fact(A)`: provide a matrix factorization of A, since two linear solves are performed (for the primal and dual values).  default is `factorize` defined in `LinearAlgebra`.
+2) `fact(A)`: provide a matrix factorization of ``A``, since two linear solves are performed (for the primal and dual values).  default is `factorize` defined in `LinearAlgebra`.

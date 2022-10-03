@@ -28,7 +28,7 @@ This package provides an implementation so that a simple one-line change can be 
 
 **Documentation**:
 
-- Start with the [quick start tutorial](tutorial.md) to learn basic usage.
+- Start with the [tutorial](tutorial.md) to learn usage.
 - The API is described in the [reference](reference.md) page.
 - The math is particularly helpful for those wanting to provide their own custom subfunctions. See the [theory](theory.md) page.
 

@@ -202,8 +202,9 @@ Make implicit function AD compatible (specifically with ForwardDiff and ReverseD
 This version is for linear equations Ay = b
 
 # Arguments
-- `A::matrix`, `b::vector`: ``y = A^{-1} b``
-- `lsolve::function`: lsolve(A, b).  Linear solve A y = b
+- `A::matrix`, `b::vector`: components of linear system ``A y = b``
+- `lsolve::function`: lsolve(A, b). Function to solve the linear system, default is backslash operator.
+- `fact::function`: fact(A).  Factorize matrix A and save it so we can reuse it for solving system and solving derivatives.  Default is factorize.
 """
 implicit_linear_function(A, b; lsolve=linear_solve, fact=factorize) = implicit_linear_function(A, b, lsolve, fact)
 

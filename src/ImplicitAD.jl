@@ -6,7 +6,7 @@ using ChainRulesCore
 using LinearAlgebra: factorize
 
 # main function
-export implicit_function, implicit_linear_function
+export implicit_function, implicit_function_1d, implicit_linear_function
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +191,30 @@ end
 # register above rule for ReverseDiff
 ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::TrackedArray, jvp, vjp, drdy, lsolve)
 ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::AbstractVector{<:TrackedReal}, jvp, vjp, drdy, lsolve)
+
+
+# ------ 1D version ------------
+
+implicit_function_1d(solve, residual, x) = solve(x)
+
+function implicit_function_1d(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}) where {T}
+    
+    # evalute solver
+    xv = fd_value(x)
+    yv = solve(xv)
+
+    # -drdx * xdot
+    rdot = jvp_forward(residual, x, yv)
+    
+    # partial derivatives
+    drdy = ForwardDiff.derivative(y -> residual(xv, y), yv)
+
+    # new derivatives
+    ydot = rdot / drdy
+
+    # repack in ForwardDiff Dual
+    return pack_dual(yv, ydot, T)
+end
 
 
 # ------ linear case ------------

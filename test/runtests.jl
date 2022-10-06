@@ -6,18 +6,19 @@ using ReverseDiff
 using FiniteDiff
 using LinearAlgebra: Symmetric, factorize
 using SparseArrays: sparse
+using FLOWMath: brent
 
 @testset "residual" begin
     
 
-    function residual!(r, x, y)
+    function residual!(r, y, x, p)
         r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
         r[2] = sin(y[2]*exp(y[1])-1)*x[4]
         return r
     end
 
-    function solve(x)
-        rwrap(r, y) = residual!(r, x[1:4], y)
+    function solve(x, p)
+        rwrap(r, y) = residual!(r, y, x[1:4], p)
         res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
         return res.zero
     end
@@ -32,7 +33,7 @@ using SparseArrays: sparse
     function modprogram(x)
         z = 2.0*x
         w = z + x.^2
-        y = implicit_function(solve, residual!, w)
+        y = implicit(solve, residual!, w, ())
         return y[1] .+ w*y[2]
     end
 
@@ -46,7 +47,7 @@ using SparseArrays: sparse
 
     # -------- supply one of the jacobians -----------
 
-    function drdy(residual, x, y)
+    function drdy(residual, y, x, p)
         A = zeros(2, 2)
         A[1, 1] = y[2]^3-x[2]
         A[1, 2] = 3*y[2]^2*(y[1]+x[1])
@@ -59,7 +60,7 @@ using SparseArrays: sparse
     function modprogram2(x)
         z = 2.0*x
         w = z + x.^2
-        y = implicit_function(solve, residual!, w, drdy=drdy)
+        y = implicit(solve, residual!, w, (), drdy=drdy)
         return y[1] .+ w*y[2]
     end
 
@@ -72,69 +73,100 @@ using SparseArrays: sparse
 end
 
 
-
-@testset "linear" begin
+@testset "not in place" begin
     
 
-    function solvelin(x)
-        A = [x[1]*x[2] x[3]+x[4];
-            x[3]+x[4] 0.0]
-        b = [2.0, 3.0]
-        Af = factorize(Symmetric(sparse(A)))
-        return Af \ b
+    function residual(y, x, p)
+        r1 = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
+        r2 = sin(y[2]*exp(y[1])-1)*x[4]
+        return [r1; r2]
     end
 
-    function Alin(residual, x, y)
-        return [x[1]*x[2] x[3]+x[4];
-            x[3]+x[4] 0.0]
+    function solve(x, p)
+        rwrap(y) = residual(y, x[1:4], p)
+        res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
+        return res.zero
     end
-
-    # r = A * y - b
-    # drdx = dAdx * y
-    function Blin(residual, x, y)
-        B = [x[2]*y[1]  x[1]*y[1]  y[2]  y[2];
-            0.0  0.0  y[1]  y[1]]
-        return B
-    end
-
-    function test(x)
-        w = implicit_function(solvelin, nothing, x, drdy=Alin, drdx=Blin)
-        return 2*w
-    end
-
-    x = [1.0, 2.0, 3.0, 4.0]
-    J1 = ForwardDiff.jacobian(test, x)
-    J2 = ReverseDiff.jacobian(test, x)
     
+    function modprogram(x)
+        z = 2.0*x
+        w = z + x.^2
+        y = implicit(solve, residual, w, ())
+        return y[1] .+ w*y[2]
+    end
+
+    x = [1.0; 2.0; 3.0; 4.0; 5.0]
+    
+    J1 = ForwardDiff.jacobian(modprogram, x)
+    J2 = ReverseDiff.jacobian(modprogram, x)
+
     @test all(isapprox.(J1, J2, atol=1e-14))
+
 end
 
 
-@testset "overload" begin
+# @testset "linear" begin
+    
 
-    function residual!(r, x, y)
+#     function solvelin(x)
+#         A = [x[1]*x[2] x[3]+x[4];
+#             x[3]+x[4] 0.0]
+#         b = [2.0, 3.0]
+#         Af = factorize(Symmetric(sparse(A)))
+#         return Af \ b
+#     end
+
+#     function Alin(residual, x, y)
+#         return [x[1]*x[2] x[3]+x[4];
+#             x[3]+x[4] 0.0]
+#     end
+
+#     # r = A * y - b
+#     # drdx = dAdx * y
+#     function Blin(residual, x, y)
+#         B = [x[2]*y[1]  x[1]*y[1]  y[2]  y[2];
+#             0.0  0.0  y[1]  y[1]]
+#         return B
+#     end
+
+#     function test(x)
+#         w = implicit_function(solvelin, nothing, x, drdy=Alin, drdx=Blin)
+#         return 2*w
+#     end
+
+#     x = [1.0, 2.0, 3.0, 4.0]
+#     J1 = ForwardDiff.jacobian(test, x)
+#     J2 = ReverseDiff.jacobian(test, x)
+    
+#     @test all(isapprox.(J1, J2, atol=1e-14))
+# end
+
+
+@testset "another overload" begin
+
+    function residual!(r, y, x, p)
         r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
         r[2] = sin(y[2]*exp(y[1])-1)*x[4]
         return r
     end
 
-    function solve(x)
-        rwrap(r, y) = residual!(r, x[1:4], y)
+    function solve(x, p)
+        rwrap(r, y) = residual!(r, y, x[1:4], p)
         res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
         return res.zero
     end
 
-    function program(x)
-        z = 2.0*x
-        w = z + x.^2
-        y = solve(w)
-        return y[1] .+ w*y[2]
-    end
+    # function program(x)
+    #     z = 2.0*x
+    #     w = z + x.^2
+    #     y = solve(w)
+    #     return y[1] .+ w*y[2]
+    # end
        
 
-    function mydrdy(x, y, A, r)
+    function mydrdy(y, x, p, A, r)
 
-        wrap!(rt, yt) = residual!(rt, x, yt)
+        wrap!(rt, yt) = residual!(rt, yt, x, p)
    
         ForwardDiff.jacobian!(A, wrap!, r, y)    
 
@@ -144,7 +176,7 @@ end
     function modprogram(x, drdy)
         z = 2.0*x
         w = z + x.^2
-        y = implicit_function(solve, residual!, w, drdy=drdy)
+        y = implicit(solve, residual!, w, (), drdy=drdy)
         return y[1] .+ w*y[2]
     end
 
@@ -154,7 +186,7 @@ end
         r = zeros(2)
         A = zeros(2, 2)
  
-        drdy(residual, x, y) = mydrdy(x, y, A, r)
+        drdy(residual, y, x, p) = mydrdy(y, x, p, A, r)
 
         wrap(x) = modprogram(x, drdy)
         
@@ -177,7 +209,7 @@ end
     function test(a)
         A = a[1]*[1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]
         b = 2.0 * a[2:4]
-        x = implicit_linear_function(A, b)
+        x = implicit_linear(A, b)
         z = 2*x
         return z
     end
@@ -185,7 +217,7 @@ end
     function test2(a)
         A = [1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]
         b = 2.0 * a[2:4]
-        x = implicit_linear_function(A, b)
+        x = implicit_linear(A, b)
         z = 2*x
         return z
     end
@@ -193,7 +225,7 @@ end
     function test3(a)
         A = a[1] * [1.0 2.0 3.0; 4.1 5.3 6.4; 7.4 8.6 9.7]
         b = 2.0 * ones(3)
-        x = implicit_linear_function(A, b)
+        x = implicit_linear(A, b)
         z = 2*x
         return z
     end
@@ -213,4 +245,26 @@ end
     J2 = ReverseDiff.jacobian(test3, a)
 
     @test all(isapprox.(J1, J2, atol=3e-12))
+end
+
+@testset "1d (also parameters)" begin
+
+    residual(y, x, p) = y/x[1] + x[2]*cos(y)
+    solve(x, p) = brent(y -> residual(y, x, p), p[1], p[2])[1]
+
+    function test(x) 
+        yl = -3.0
+        yu = 3.0
+        p = [yl, yu]
+        x[1] *= 3
+        y = implicit(solve, residual, x, p)
+        z = [y; (x[2]+3)^2]
+        return z
+    end
+    
+    xv = [0.5, 1.0]
+    test(xv)
+
+    ForwardDiff.jacobian(test, xv)
+    
 end

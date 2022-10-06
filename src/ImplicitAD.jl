@@ -6,7 +6,7 @@ using ChainRulesCore
 using LinearAlgebra: factorize
 
 # main function
-export implicit_function, implicit_function_1d, implicit_linear_function
+export implicit, implicit_linear
 
 
 # ---------------------------------------------------------------------------
@@ -36,13 +36,13 @@ pack_dual(yv::AbstractVector, dy, T) = ForwardDiff.Dual{T}.(yv, ForwardDiff.Part
 # ---------- core methods -----------------
 
 """
-Compute Jacobian vector product b = B*v where B_ij = ∂r_i/∂x_j
-This takes in the dual directly since it is already formed that way.
+Compute Jacobian vector product b = -B*xdot where B_ij = ∂r_i/∂x_j
+This takes in the dual directly for x = (xv, xdot) since it is already formed that way.
 """
-function jvp_forward(residual, xd, y)
+function jvp(residual, y, xd, p)
     
     # evaluate residual function
-    rd = residual(xd, y)  # constant y
+    rd = residual(y, xd, p)  # constant y
     
     # extract partials
     b = -fd_partials(rd) 
@@ -52,38 +52,23 @@ function jvp_forward(residual, xd, y)
 end
 
 """
-internal convenience method for when user can provide drdx
-"""
-function jvp_provide(residual, x, y, v, drdx)
-    
-    B = drdx(residual, x, y)
-    return B*v
-
-end
-
-"""
 Compute vector Jacobian product c = B^T v = (v^T B)^T where B_ij = ∂r_i/∂x_j and return c
 """
-function vjp_reverse(residual, x, y, v)
-    return ReverseDiff.gradient(xtilde -> v' * residual(xtilde, y), x)  # instead of using underlying functions in ReverseDiff just differentiate -v^T * r with respect to x to get -v^T * dr/dx
-end
-
-"""
-internal convenience method for when user can provide drdx
-"""
-function vjp_provide(residual, x, y, v, drdx)
-    
-    B = drdx(residual, x, y)
-    return (v'*B)'
-    
+function vjp(residual, y, x, p, v)
+    return ReverseDiff.gradient(xtilde -> v' * residual(y, xtilde, p), x)  # instead of using underlying functions in ReverseDiff just differentiate -v^T * r with respect to x to get -v^T * dr/dx
 end
 
 
 """
 compute A_ij = ∂r_i/∂y_j
 """
-function drdy_forward(residual, x, y)
-    A = ForwardDiff.jacobian(ytilde -> residual(x, ytilde), y)
+function drdy_forward(residual, y::AbstractVector, x, p)
+    A = ForwardDiff.jacobian(ytilde -> residual(ytilde, x, p), y)
+    return A
+end
+
+function drdy_forward(residual, y::Number, x, p)  # 1D case
+    A = ForwardDiff.derivative(ytilde -> residual(ytilde, x, p), y)
     return A
 end
 
@@ -93,134 +78,131 @@ Linear solve A x = b  (where A is computed in drdy and b is computed in jvp).
 """
 linear_solve(A, b) = A\b
 
+linear_solve(A::Number, b) = b / A  # scalar division for 1D case
+
 # -----------------------------------------
 
 
 
-# ---------- Overloads for implicit_function ---------
+# ---------- Overloads for implicit ---------
 
 """
-    implicit_function(solve, residual, x; jvp=jvp_forward, vjp=vjp_reverse, drdx=nothing, drdy=drdy_forward, lsolve=linear_solve)
+    implicit(solve, residual, x; drdy=drdy_forward, lsolve=linear_solve)
 
 Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
 
 # Arguments
-- `solve::function`: y = solve(x). Solve implicit function (where residual!(r, x, y) = 0, see below)
-- `residual!::function`: residual!(r, x, y). Set residual r, given input x and state y.
+- `solve::function`: y = solve(x, p). Solve implicit function for the residual defined below.
+- `residual::function`: Either r = residual(y, x, p) or in-place residual!(r, y, x, p). Set residual r, given state y, variables x and fixed parameters p.
 - `x::vector{float}`: evaluation point.
-- `jvp::function`: jvp(residual, x, y, v).  Compute Jacobian vector product b = B*v where B_ij = ∂r_i/∂x_j.  r = residual(x, y) (note explicit form.  Default leverages dual numbers in forward mode AD where Jacobian is not explicitly constructed.
-- `vjp::function`: vjp(residual, x, y, v).  Compute vector Jacobian product c = B^T v = (v^T B)^T where B_ij = ∂r_i/∂x_j and return c  Default is reverse mode AD where Jacobian is not explicitly constructed.  Computes gradient of a scalar function.
-- `drdx::function`: drdx(residual, x, y).  Provide (or compute yourself): ∂r_i/∂x_j.  Not a required function. Default is nothing.  If provided, then jvp and jvp are ignored and explicitly multiplied against this provided Jacobian.
-- `drdy::function`: drdy(residual, x, y).  Provide (or compute yourself): ∂r_i/∂y_j.  Default is forward mode AD.
+- `p::tuple`: fixed parameters
+- `drdy::function`: drdy(residual, y, x, p).  Provide (or compute yourself): ∂r_i/∂y_j.  Default is forward mode AD.
 - `lsolve::function`: lsolve(A, b).  Linear solve A x = b  (where A is computed in drdy and b is computed in jvp, or it solves A^T x = c where c is computed in vjp).  Default is backslash operator.
 """
-function implicit_function(solve, residual!, x; jvp=jvp_forward, vjp=vjp_reverse, drdx=nothing, drdy=drdy_forward, lsolve=linear_solve)
+function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_solve)
 
-    # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
-    function residual(x, y)
-        T = promote_type(eltype(x), eltype(y))
-        r = zeros(T, length(y))  # match type of input variables
-        residual!(r, x, y)
-        return r
+    # ---- check for in-place version and wrap as needed -------
+    new_residual = residual
+    if applicable(residual, 1.0, 1.0, 1.0, 1.0)  # in-place
+        
+        function residual_wrap(yw, xw, pw)  # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
+            T = promote_type(eltype(xw), eltype(yw))
+            rw = zeros(T, length(yw))  # match type of input variables
+            residual(rw, yw, xw, pw)
+            return rw
+        end
+        new_residual = residual_wrap
     end
     
-    # if dr/dx is provided, then just directly multiply
-    if !isnothing(drdx)
-        newjvp(residual, x, y, v) = jvp_provide(residual, x, y, v, drdx)
-        jvp = newjvp
-        newvjp(residual, x, y, v) = vjp_provide(residual, x, y, v, drdx)
-        vjp = newvjp
-    end
-
-    return implicit_function(solve, residual, x, jvp, vjp, drdy, lsolve)
+    return implicit(solve, new_residual, x, p, drdy, lsolve)
 end
 
 
 
 # If no AD, just solve normally.
-implicit_function(solve, residual, x, jvp, vjp, drdy, lsolve) = solve(x)
+implicit(solve, residual, x, p, drdy, lsolve) = solve(x, p)
 
 
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using 
 # Jacobian vector product.
-function implicit_function(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, jvp, vjp, drdy, lsolve) where {T}
+function implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, drdy, lsolve) where {T}
     
     # evalute solver
     xv = fd_value(x)
-    yv = solve(xv)
+    yv = solve(xv, p)
     
     # solve for Jacobian-vector product
-    if applicable(jvp, residual, x, yv)  # alternate function signature that uses dual directly
-        b = jvp(residual, x, yv)
-    else
-        dx = fd_partials(x)
-        b = jvp(residual, xv, yv, -dx)
-    end
+    b = jvp(residual, yv, x, p)
 
     # comptue partial derivatives
-    A = drdy(residual, xv, yv)
+    A = drdy(residual, yv, xv, p)
     
     # linear solve
-    dy = lsolve(A, b)
-
-    # repack in ForwardDiff Dual
-    return pack_dual(yv, dy, T)
-end
-
-
-# Provide a ChainRule rule for reverse mode
-function ChainRulesCore.rrule(::typeof(implicit_function), solve, residual, x, jvp, vjp, drdy, lsolve)
-
-    # evalute solver
-    y = solve(x)
-
-    # comptue partial derivatives
-    A = drdy(residual, x, y)
-
-    function implicit_pullback(dy)
-        u = lsolve(A', dy)
-        dx = vjp(residual, x, y, -u)
-        return NoTangent(), NoTangent(), NoTangent(), dx, NoTangent(), NoTangent(), NoTangent(), NoTangent()
-    end
-
-    return y, implicit_pullback
-end
-
-
-# register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::TrackedArray, jvp, vjp, drdy, lsolve)
-ReverseDiff.@grad_from_chainrules implicit_function(solve, residual, x::AbstractVector{<:TrackedReal}, jvp, vjp, drdy, lsolve)
-
-
-# ------ 1D version ------------
-
-implicit_function_1d(solve, residual, x) = solve(x)
-
-function implicit_function_1d(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}) where {T}
-    
-    # evalute solver
-    xv = fd_value(x)
-    yv = solve(xv)
-
-    # -drdx * xdot
-    rdot = jvp_forward(residual, x, yv)
-    
-    # partial derivatives
-    drdy = ForwardDiff.derivative(y -> residual(xv, y), yv)
-
-    # new derivatives
-    ydot = rdot / drdy
+    ydot = lsolve(A, b)
 
     # repack in ForwardDiff Dual
     return pack_dual(yv, ydot, T)
 end
 
 
+# Provide a ChainRule rule for reverse mode
+function ChainRulesCore.rrule(::typeof(implicit), solve, residual, x, p, drdy, lsolve)
+
+    # evalute solver
+    y = solve(x, p)
+
+    # comptue partial derivatives
+    A = drdy(residual, y, x, p)
+
+    function pullback(ybar)
+        u = lsolve(A', ybar)
+        xbar = vjp(residual, y, x, p, -u)
+        return NoTangent(), NoTangent(), NoTangent(), xbar, NoTangent(), NoTangent(), NoTangent()
+    end
+
+    return y, pullback
+end
+
+
+# register above rule for ReverseDiff
+ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::TrackedArray, p, drdy, lsolve)
+ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::AbstractVector{<:TrackedReal}, p, drdy, lsolve)
+
+
+# ------ 1D version ------------
+
+# """
+#     implicit_1d(solve, residual, x)
+
+# TODO
+# """
+# implicit_1d(solve, residual, x) = solve(x)
+
+# function implicit_1d(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}) where {T}
+    
+#     # evalute solver
+#     xv = fd_value(x)
+#     yv = solve(xv)
+
+#     # -drdx * xdot
+#     rdot = jvp(residual, x, yv)
+    
+#     # partial derivatives
+#     drdy = ForwardDiff.derivative(y -> residual(xv, y), yv)
+
+#     # new derivatives
+#     ydot = rdot / drdy
+
+#     # repack in ForwardDiff Dual
+#     return pack_dual(yv, ydot, T)
+# end
+
+
 # ------ linear case ------------
 
 """
-    implicit_linear_function(A, b; lsolve=linear_solve, fact=factorize)
+    implicit_linear(A, b; lsolve=linear_solve, fact=factorize)
 
 Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
 This version is for linear equations Ay = b
@@ -230,22 +212,22 @@ This version is for linear equations Ay = b
 - `lsolve::function`: lsolve(A, b). Function to solve the linear system, default is backslash operator.
 - `fact::function`: fact(A).  Factorize matrix A and save it so we can reuse it for solving system and solving derivatives.  Default is factorize.
 """
-implicit_linear_function(A, b; lsolve=linear_solve, fact=factorize) = implicit_linear_function(A, b, lsolve, fact)
+implicit_linear(A, b; lsolve=linear_solve, fact=factorize) = implicit_linear(A, b, lsolve, fact)
 
 
 # If no AD, just solve normally.
-implicit_linear_function(A, b, lsolve, fact) = lsolve(fact(A), b)
+implicit_linear(A, b, lsolve, fact) = lsolve(fact(A), b)
 
 # catch three cases where one or both contain duals
-implicit_linear_function(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
-implicit_linear_function(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
-implicit_linear_function(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
+implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
+implicit_linear(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
+implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
 
 
 # Both A and b contain duals
 function linear_dual(A, b, lsolve, fact, T)
     
-    # unpack dual numbers (if not dual numbers just returns itself)
+    # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
     Av = fd_value(A)
     bv = fd_value(b)
 
@@ -267,7 +249,7 @@ end
 
 
 # Provide a ChainRule rule for reverse mode
-function ChainRulesCore.rrule(::typeof(implicit_linear_function), A, b, lsolve, fact)
+function ChainRulesCore.rrule(::typeof(implicit_linear), A, b, lsolve, fact)
 
     # save factorization
     Af = fact(ReverseDiff.value(A))
@@ -284,7 +266,9 @@ function ChainRulesCore.rrule(::typeof(implicit_linear_function), A, b, lsolve, 
 end
 
 # register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules implicit_linear_function(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b, lsolve, fact)
-ReverseDiff.@grad_from_chainrules implicit_linear_function(A, b::Union{TrackedArray, AbstractArray{<:TrackedReal}}, lsolve, fact)
-ReverseDiff.@grad_from_chainrules implicit_linear_function(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b::Union{TrackedArray, AbstractVector{<:TrackedReal}}, lsolve, fact)
+ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b, lsolve, fact)
+ReverseDiff.@grad_from_chainrules implicit_linear(A, b::Union{TrackedArray, AbstractArray{<:TrackedReal}}, lsolve, fact)
+ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b::Union{TrackedArray, AbstractVector{<:TrackedReal}}, lsolve, fact)
+
+
 end

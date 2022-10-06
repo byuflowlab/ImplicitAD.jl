@@ -2,9 +2,9 @@
 
 We can generically represent the solver that converges the residuals and computes the corresponding state variables as:
 
-`y = solve(x)`
+`y = solve(x, p)`
 
-Our larger code may then have a mix of explicit and implicit functions
+Where x are variables and p are fixed parameters.  Our larger code may then have a mix of explicit and implicit functions.
 
 ```julia
 function example(a)
@@ -16,20 +16,28 @@ function example(a)
 end
 ```
 
-To make this function compatible we only need to replace the call to `solve` with an overloaded function `implicit_function` defined in this module:
+To make this function compatible we only need to replace the call to `solve` with an overloaded function `implicit` defined in this module:
 ```julia
 using ImplicitAD
 
 function example(a)
     b = 2*a
     x = @. exp(b) + a
-    y = implicit_function(solve, residual, x)
+    y = implicit(solve, residual, x)
     z = sqrt.(y)
     return z
 end
 ```
-Note that the only new piece of information we need to expose is the residual function: `residual(r, x, y)`, so that partial derivatives can be computed.  The new function is now compatible with ForwardDiff or ReverseDiff, for any solver, and efficiently provides the correct derivatives without differentiating inside the solver.
+Note that the only new piece of information we need to expose is the residual function so that partial derivatives can be computed.  The new function is now compatible with ForwardDiff or ReverseDiff, for any solver, and efficiently provides the correct derivatives without differentiating inside the solver.
 
+The residuals can either be returned: 
+`r = residual(y, x, p)` 
+or modified in place: 
+`residual!(r, y, x, p)`.
+
+The input x should be a vector, and p is a tuple of fixed parameters.  The state and corresponding residuals, y and r, can be vectors or scalars (for 1D residuals).  The subfunctions are overloaded to handle both cases efficiently.
+
+Limitation: ReverseDiff does not currently support compiling the tape for custome rules.  See this issue in ReverseDiff: https://github.com/JuliaDiff/ReverseDiff.jl/issues/187
 
 ## Basic Usage
 
@@ -39,18 +47,18 @@ r_1(x, y) = (y_1 + x_1) (y_2^3 - x_2) + x_3 = 0
 r_2(x, y) = \sin(y_2 \exp(y_1) - 1) x_4 = 0
 ```
 
-We will use the NLsolve package to solve these equations (refer to the first example in their documentation if not familiar with NLsolve).  We will also put explict operations before and after the solve just to show how this will work in the midst of a larger program.  
+We will use the NLsolve package to solve these equations (refer to the first example in their documentation if not familiar with NLsolve).  We will also put explict operations before and after the solve just to show how this will work in the midst of a larger program.  In this case we use the in-place form of the residual function.
 
 ```@example basic
 using NLsolve
 
-function residual!(r, x, y)
+function residual!(r, y, x, p)
     r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
     r[2] = sin(y[2]*exp(y[1])-1)*x[4]
 end
 
-function solve(x)
-    rwrap(r, y) = residual!(r, x[1:4], y)  # closure using some of the input variables within x just as an example
+function solve(x, p)
+    rwrap(r, y) = residual!(r, y, x[1:4], p)  # closure using some of the input variables within x just as an example
     res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
     return res.zero
 end
@@ -72,7 +80,7 @@ using ImplicitAD
 function modprogram(x)
     z = 2.0*x
     w = z + x.^2
-    y = implicit_function(solve, residual!, w)
+    y = implicit(solve, residual!, w)
     return y[1] .+ w*y[2]
 end
 nothing # hide
@@ -95,28 +103,18 @@ println("max abs difference = ", maximum(abs.(J1 - J2)))
 
 ## Overloading Subfunctions
 
-As outlined in the math derivation, the forward mode consists of three main operations and custom implementations can be passed in.
+If the user can provide (or lazily compute) their own partial derivatives for ``\partial{r}/\partial{y}`` then they can provide their own subfunction:
+`∂r∂y = drdy(residual, y, x, p)` (where `r = residual(y, x, p)`).  The default implementation computes these partials with ForwardDiff. Some examples where one may wish to override this behavior are for cases significant sparsity (e.g., using SparseDiffTools), for a large number of residuals (e.g., preallocating this Jacobian), or to provide a specific matrix factorization.
 
-1) `jvp(residual, x, y, v)`:  Compute the Jacobian vector product `b = B*v` where ``B_{ij} = \partial r_i/\partial x_j``.  The default implementation uses forward mode AD where the Jacobian is not explicitly constructed (hence a Jacobian vector product).  This requires just evaluating the residual explicitly with dual numbers.
+Additionally the user can override the linear solve:
+`x = lsolve(A, b)`.  The default is the backslash operator.  One example where a user may wish to override is to use matrix-free Krylov methods for large systems (in connection with the computation for ∂r∂y).
 
-2) `drdy(residual, x, y)`: Provide/compute or lazily instantiate ``\partial r_i/\partial y_j``.  The default is forward mode AD.
+The other partials, ∂r/∂x, are not computed directly, but rather are used in efficient Jacobian vector (or vector Jacobian) products.
 
-3) `lsolve(A, b)`: Solve linear system ``A x = b`` where ``A`` is computed in `drdy` and ``b`` is computed in `jvp`.  The default is the backsplash operator.
-
-In the reverse mode the operations are:
-
-1) `drdy(residual, x, y)`: same as above.
-
-2) `lsolve(A, b)`: same as above (although the passed in `A` is now the transpose of the matrix computed in `drdy` and ``b`` is a provided input).
-
-3) `vjp(residual, x, y, v)`:  Compute the vector Jacobian product ``c = B^T v = (v^T B)^T`` where ``B_{ij} = \partial r_i/\partial x_j``.  The default implementation uses reverse mode AD where the Jacobian is not explicitly constructed.  Instead only a gradient call is needed.
-
-Note that in all of these subfunctions `residual` is of the explicit form: `r = residual(x, y)`.  Since two of the functions are repeated, there are 4 functions that can be overriden if desired. Perhaps the most common would be to override `drdy` for cases where the Jacobian has significant sparsity, or is large so memory preallocation is important, or to apply a specific matrix factorization.  The linear solver `lsolve` might be overriden to use a Krylov method (in connection with using JVPs rather than an explicit `drdy`).  The functions `jvp` and `vjp` would be less commonly overriden, as they are efficient, but are available as needed.  There is also a keyword `drdx` where one can pass in a function of the same signature of `drdy` (but to compute ``\partial{r}/\partial{x}``).  This is less commonly useful as both `jvp` and `vjp` would then use explicit matrix multiplication, but may be beneficial in some cases.
-
-As an example of custom subfunctions, let's continue the same problem from the previous section.  We note that we can provide the Jacobian ``\partial r/\partial y`` analytically and so we will skip the internal ForwardDiff implementation. We provide our own function for `drdy`, and we will preallocate so we can modify the Jacobian in place:
+As an example, let's continue the same problem from the previous section.  We note that we can provide the Jacobian ``\partial r/\partial y`` analytically and so we will skip the internal ForwardDiff implementation. We provide our own function for `drdy`, and we will preallocate so we can modify the Jacobian in place:
 
 ```@example basic
-function drdy(residual, x, y, A)
+function drdy(residual, y, x, p, A)
     A[1, 1] = y[2]^3-x[2]
     A[1, 2] = 3*y[2]^2*(y[1]+x[1])
     u = exp(y[1])*cos(y[2]*exp(y[1])-1)*x[4]
@@ -127,7 +125,6 @@ end
 nothing # hide
 ```
 
-
 We can now pass this function in with a keyword argument to replace the default implementation for this subfunction.
 
 ```@example basic
@@ -135,8 +132,9 @@ function modprogram2(x)
     z = 2.0*x
     w = z + x.^2
     A = zeros(2, 2)
-    my_drdy(residual, x, y) = drdy(residual, x, y, A)
-    y = implicit_function(solve, residual!, w, drdy=my_drdy)
+    my_drdy(residual, y, x, p) = drdy(residual, y, x, p, A)
+    p = () # no parameters in this case
+    y = implicit(solve, residual!, w, p, drdy=my_drdy)
     return y[1] .+ w*y[2]
 end
 
@@ -167,7 +165,7 @@ end
 nothing # hide
 ```
 
-This function is actually not compatible with ForwardDiff because of the use of a sparse matrix (obviously unnecessary with such a small matrix, just for illustration).  We now modify this function using this package, with a one line change using `implicit_linear_function`, and can now compute the Jacobian.
+This function is actually not compatible with ForwardDiff because of the use of a sparse matrix (obviously unnecessary with such a small matrix, just for illustration).  We now modify this function using this package, with a one line change using `implicit_linear`, and can now compute the Jacobian.
 
 Let's consider a simple example.
 
@@ -181,7 +179,7 @@ function modprogram(x)
         x[3]+x[4] 0.0]
     b = [2.0, 3.0]
     A = sparse(Araw)
-    y = implicit_linear_function(A, b)
+    y = implicit_linear(A, b)
     z = y.^2
     return z
 end
@@ -195,7 +193,7 @@ println(J1)
 println(maximum(abs.(J1 - J2)))
 ```
 
-For `implicit_linear_function` there are two keywords for custom subfunctions: 
+For `implicit_linear` there are two keywords for custom subfunctions: 
 
 1) `lsolve(A, b)`: same purpose as before: solve ``A x = b`` where the default is the backslash operator.
 2) `fact(A)`: provide a matrix factorization of ``A``, since two linear solves are performed (for the primal and dual values).  default is `factorize` defined in `LinearAlgebra`.

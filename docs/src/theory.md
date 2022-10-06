@@ -35,11 +35,15 @@ We can compute the resulting Jacobian vector product (Jacobian B times some vect
 
 With the right-hand side complete, we just need to compute the square Jacobian ``A = \partial r / \partial y`` and solve the linear system.  
 ```math
-A dy = b
+A \dot{y} = b
 ```
 Because A is square, forward mode AD is usually preferable for computing these partial derivatives. If we know the structure of A, we would want to provide an appropriate factorization of A.  Often, this Jacobian is sparse, and so using graph coloring is desirable.  Also for very large systems we can use matrix-free methods (e.g., Krylov methods) to solve the linear system without actually constructing A.
 
-In this package the default is just dense forward-mode AD (not-in place). But the function can easily be overloaded for your use case where you can pre-allocate, use sparse matrices, graph coloring (see SparseDiffTools.jl), and your own desired linear solver.
+In summary the operations are:
+1) Compute the JVP: ``b = -B \dot{x}`` for the upstream input ``\dot{x}`` where ``B = \partial r/\partial x``.
+2) Solve the linear system: ``A \dot{y} = b`` where ``A = \partial r / \partial y``.
+
+In this package the default is just dense forward-mode AD (not-in place). But the function can easily be overloaded for your use case where you can pre-allocate, use sparse matrices with graph coloring (see SparseDiffTools.jl), and your own desired linear solver.
 
 
 #### Reverse Mode
@@ -83,6 +87,9 @@ In this implementation, rather than go under the hood and manipulate the seed (s
 which the expansion shows gives us the desired product.
 To repeat, we just compute the gradient of ``(v^T r)``  with respect to ``x`` (note it is a gradient and not a Jacobian since we have a scalar output). This gives the desired vector, i.e., the derivatives ``\bar{x}``.
 
+In summary the operations are:
+1) Solve the linear system: ``A^T u = \bar{y}`` for the upstream input ``\bar{y}`` where ``A = \partial r / \partial y``.
+2) Compute the VJP: ``\bar{x} = -B^T u`` where ``B = \partial r/\partial x``.
 
 ### Linear Equations
 

@@ -8,7 +8,7 @@
 
 - Compatible with ForwardDiff and ReverseDiff
 - Compatible with any solver (no differentiation occurs inside the solver)
-- One line change for most cases
+- Simple drop in functionality
 - Customizable subfunctions to accomodate different use cases
 - Version for linear systems to provide symbolic partials automatically (again works with any linear solve whether or not it was already overloaded for AD)
 

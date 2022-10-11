@@ -6,7 +6,7 @@ using ChainRulesCore
 using LinearAlgebra: factorize
 
 # main function
-export implicit, implicit_linear
+export implicit, implicit_linear, apply_factorization
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +174,23 @@ ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::AbstractVector{<:
 # ------ linear case ------------
 
 """
+Apply a matrix factorization to the primal portion of a dual number.
+Avoids user from needing to add ForwardDiff as a dependency.
+"""
+function apply_factorization(A::AbstractArray{<:ForwardDiff.Dual{T}}, factfun) where {T}
+    Av = fd_value(A)
+    return factfun(Av)
+end
+
+# just apply factorization normally for case with no Duals
+apply_factorization(A, factfun) = factfun(A)
+
+# default factorization
+apply_factorization(A) = apply_factorization(A, factorize)
+
+
+
+"""
     implicit_linear(A, b; lsolve=linear_solve, fact=factorize)
 
 Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
@@ -182,38 +199,36 @@ This version is for linear equations Ay = b
 # Arguments
 - `A::matrix`, `b::vector`: components of linear system ``A y = b``
 - `lsolve::function`: lsolve(A, b). Function to solve the linear system, default is backslash operator.
-- `fact::function`: fact(A).  Factorize matrix A and save it so we can reuse it for solving system and solving derivatives.  Default is factorize.
+- `Af::factorization`: An optional factorization of A, useful to override default factorize, or if multiple linear solves will be performed with same A matrix.
 """
-implicit_linear(A, b; lsolve=linear_solve, fact=factorize) = implicit_linear(A, b, lsolve, fact)
+implicit_linear(A, b; lsolve=linear_solve, Af=nothing) = implicit_linear(A, b, lsolve, Af)
 
 
 # If no AD, just solve normally.
-implicit_linear(A, b, lsolve, fact) = lsolve(fact(A), b)
+implicit_linear(A, b, lsolve, Af) = isnothing(Af) ? lsolve(A, b) : lsolve(Af, b)
 
 # catch three cases where one or both contain duals
-implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
-implicit_linear(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
-implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, fact) where {T} = linear_dual(A, b, lsolve, fact, T)
-
+implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, Af) where {T} = linear_dual(A, b, lsolve, Af, T)
+implicit_linear(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, Af) where {T} = linear_dual(A, b, lsolve, Af, T)
+implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, Af) where {T} = linear_dual(A, b, lsolve, Af, T)
 
 # Both A and b contain duals
-function linear_dual(A, b, lsolve, fact, T)
+function linear_dual(A, b, lsolve, Af, T)
     
     # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
-    Av = fd_value(A)
     bv = fd_value(b)
 
     # save factorization since we will perform two linear solves
-    Af = fact(Av)
+    Afact = isnothing(Af) ? factorize(fd_value(A)) : Af
     
     # evalute linear solver
-    yv = lsolve(Af, bv)
+    yv = lsolve(Afact, bv)
     
     # extract Partials of b - A * y  i.e., bdot - Adot * y  (since y does not contain duals)
     rhs = fd_partials(b - A*yv)
     
     # solve for new derivatives
-    dy = lsolve(Af, rhs)
+    dy = lsolve(Afact, rhs)
 
     # repack in ForwardDiff Dual
     return pack_dual(yv, dy, T)
@@ -221,16 +236,16 @@ end
 
 
 # Provide a ChainRule rule for reverse mode
-function ChainRulesCore.rrule(::typeof(implicit_linear), A, b, lsolve, fact)
+function ChainRulesCore.rrule(::typeof(implicit_linear), A, b, lsolve, Af)
 
     # save factorization
-    Af = fact(ReverseDiff.value(A))
+    Afact = isnothing(Af) ? factorize(ReverseDiff.value(A)) : Af
 
     # evalute solver
-    y = lsolve(Af, b)
+    y = lsolve(Afact, b)
     
     function implicit_pullback(ybar)
-        u = lsolve(Af', ybar)
+        u = lsolve(Afact', ybar)
         return NoTangent(), -u*y', u, NoTangent(), NoTangent()
     end
 
@@ -238,9 +253,9 @@ function ChainRulesCore.rrule(::typeof(implicit_linear), A, b, lsolve, fact)
 end
 
 # register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b, lsolve, fact)
-ReverseDiff.@grad_from_chainrules implicit_linear(A, b::Union{TrackedArray, AbstractArray{<:TrackedReal}}, lsolve, fact)
-ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b::Union{TrackedArray, AbstractVector{<:TrackedReal}}, lsolve, fact)
+ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b, lsolve, Af)
+ReverseDiff.@grad_from_chainrules implicit_linear(A, b::Union{TrackedArray, AbstractArray{<:TrackedReal}}, lsolve, Af)
+ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, AbstractArray{<:TrackedReal}}, b::Union{TrackedArray, AbstractVector{<:TrackedReal}}, lsolve, Af)
 
 
 end

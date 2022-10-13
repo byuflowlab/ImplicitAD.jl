@@ -101,19 +101,21 @@ println(maximum(abs.(J1 - J2)))</code></pre><pre class="documenter-example-outpu
     y = x.^2
     z = [x; y]
     return z
-end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">external (generic function with 1 method)</code></pre><p>Let&#39;s now call this function from our larger program that we wish to pass AD through:</p><pre><code class="language-julia hljs">function program(x)
+end</code></pre><p>Let&#39;s now call this function from our larger program that we wish to pass AD through:</p><pre><code class="language-julia hljs">function program(x)
     y = sin.(x)
     p = ()
     z = external(y, p)
     w = 5 * z
     return w
-end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">program (generic function with 1 method)</code></pre><p>Again, we assume that external is not AD compatible, so we modify this function with the <code>provide_rule</code> function provided in this package.</p><pre><code class="language-julia hljs">function modprogram(x)
+end</code></pre><p>Again, we assume that external is not AD compatible, so we modify this function with the <code>provide_rule</code> function provided in this package.</p><pre><code class="language-julia hljs">using ImplicitAD
+
+function modprogram(x)
     y = sin.(x)
     p = ()
     z = provide_rule(external, y, p, &quot;ffd&quot;)
     w = 5 * z
     return w
-end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">modprogram (generic function with 1 method)</code></pre><p>The last argument we provided is the mode, which can be either:</p><ul><li>&quot;ffd&quot;: forward finite differencing</li><li>&quot;cfd&quot;: central finite differencing</li><li>&quot;cs&quot;: complex step</li><li>&quot;jacobian&quot;: you provide <code>J = jacobian(x, p)</code>, use also keyword jacobian</li><li>&quot;vp&quot;: you provide Jacobian vector product <code>jvp(x, p, v)</code> and vector Jacobian product <code>vjp(x, p, v)</code> see keywords <code>jvp</code> and <code>vjp</code></li></ul><p>We can now use ForwardDiff or ReverseDiff and just the external code will be finite differenced (since we chose &quot;ffd&quot; above), and inserted into the AD chain.  Since this example is actually AD compatible everywhere we compare to using ForwardDiff through everything.</p><pre><code class="language- hljs">x = [1.0; 2.0; 3.0]
+end</code></pre><p>The last argument we provided is the mode, which can be either:</p><ul><li>&quot;ffd&quot;: forward finite differencing</li><li>&quot;cfd&quot;: central finite differencing</li><li>&quot;cs&quot;: complex step</li><li>&quot;jacobian&quot;: you provide <code>J = jacobian(x, p)</code>, use also keyword jacobian</li><li>&quot;vp&quot;: you provide Jacobian vector product <code>jvp(x, p, v)</code> and vector Jacobian product <code>vjp(x, p, v)</code> see keywords <code>jvp</code> and <code>vjp</code></li></ul><p>We can now use ForwardDiff or ReverseDiff and just the external code will be finite differenced (since we chose &quot;ffd&quot; above), and inserted into the AD chain.  Since this example is actually AD compatible everywhere we compare to using ForwardDiff through everything.</p><pre><code class="language- hljs">x = [1.0; 2.0; 3.0]
 Jtrue = ForwardDiff.jacobian(program, x) 
 J1 = ForwardDiff.jacobian(modprogram, x)
 J2 = ReverseDiff.jacobian(modprogram, x)
@@ -161,4 +163,4 @@ end
 J1 = ForwardDiff.jacobian(modprogram, x)
 J2 = ReverseDiff.jacobian(modprogram, x)
 println(maximum(abs.(Jtrue - J1)))
-println(maximum(abs.(Jtrue - J2)))</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../reference/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.23 on <span class="colophon-date" title="Thursday 13 October 2022 17:36">Thursday 13 October 2022</span>. Using Julia version 1.8.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+println(maximum(abs.(Jtrue - J2)))</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../reference/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.23 on <span class="colophon-date" title="Thursday 13 October 2022 18:11">Thursday 13 October 2022</span>. Using Julia version 1.8.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

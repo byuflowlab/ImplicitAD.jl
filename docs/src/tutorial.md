@@ -214,6 +214,7 @@ function external(x, p)
     z = [x; y]
     return z
 end
+nothing # hide
 ```
 
 Let's now call this function from our larger program that we wish to pass AD through:
@@ -226,11 +227,14 @@ function program(x)
     w = 5 * z
     return w
 end
+nothing # hide
 ```
 
 Again, we assume that external is not AD compatible, so we modify this function with the `provide_rule` function provided in this package.
 
 ```@example custom
+using ImplicitAD
+
 function modprogram(x)
     y = sin.(x)
     p = ()
@@ -238,6 +242,7 @@ function modprogram(x)
     w = 5 * z
     return w
 end
+nothing # hide
 ```
 
 The last argument we provided is the mode, which can be either:

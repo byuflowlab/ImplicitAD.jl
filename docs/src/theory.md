@@ -228,9 +228,9 @@ The derivatives we are after are:
 ```
 or in our notation
 ```math
-\ydot = J \xdot
+\dot{y} = J \dot{x}
 ```
-where ``\xdot`` is known at this stage of the AD chain.
+where ``\dot{x}`` is known at this stage of the AD chain.
 
 A user may be able to provide the Jacobian or the Jacobian-vector product directly.  If not, we can use finite differencing on complex step.  
 
@@ -246,11 +246,11 @@ Reverse is similar:
 ```
 or in our notation
 ```math
-\xbar = J^T \ybar
+\bar{x} = J^T \bar{y}
 ```
-where ``\ybar`` is known at this stage of the AD chain (though generally given for just one value of ``\xi`` at a time).
+where ``\bar{y}`` is known at this stage of the AD chain (though generally given for just one value of ``\xi`` at a time).
 
 In this case the user can again provide the Jacobian or the vector-Jacobian product (v^T J), or we can use finite differencing on complex step.  
 
-Finite differencing and complex step only work in a forward manner and so we cannot compute the VJP directly, the only option in revese mode is to construct the Jacobian via finite differencing and then multiply.  If we had the whole Jacobian ``\xbar`` available we could actually perform a JVP for each ``y_i``.  However, the pullbacks only provide the opposite as noted above.
+Finite differencing and complex step only work in a forward manner and so we cannot compute the VJP directly, the only option in revese mode is to construct the Jacobian via finite differencing and then multiply.  If we had the whole Jacobian ``\bar{x}`` available we could actually perform a JVP for each ``y_i``.  However, the pullbacks only provide the opposite as noted above.
 

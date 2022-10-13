@@ -197,3 +197,118 @@ For `implicit_linear` there are two keywords for custom subfunctions:
 
 1) `lsolve(A, b)`: same purpose as before: solve ``A x = b`` where the default is the backslash operator.
 2) `fact(A)`: provide a matrix factorization of ``A``, since two linear solves are performed (for the primal and dual values).  default is `factorize` defined in `LinearAlgebra`.
+
+## Custom Rules
+
+Consider now explicit (or potentially implicit) functions of the form: `y = func(x, p)` where `x` are variables and `p` are fixed parameters.  For cases where `func` is not compatible with AD, or for cases where we have a more efficient rule, we will want to insert our own derivatives into the AD chain.  This functionality could also be used for mixed-mode AD.  For example, by wrapping some large section of code in a function that we reply reverse mode AD on, then using that as a custom rule for the overall code that might be operating in forward mode.  More complex nestings are of course possible.  
+
+One common use case for a custom rule is when an external function call is needed, i.e., a function from another programming language is used within a larger Julia code.
+
+We provide five options for injecting the derivatives of `func`.  You can provide the Jacobian `J = dy/dx`, or the JVPs/VJPs ``J v `` and ``v^T J``.  Alternatively, you can allow the package to estimate the derivatives using forward finite differencing, central finite differencing, or complex step.  In forward operation (with the finite differencing options) the package will choose between computing the Jacobian first or computing JVPs directly in order to minimize the number of calls to `func`.  
+
+Below is a simple example.  Let's first create a function, we call external, meant to represent a function that we cannot pass AD through (but of course can in this simple example).
+
+```@example custom
+function external(x, p)
+    y = x.^2
+    z = [x; y]
+    return z
+end
+```
+
+Let's now call this function from our larger program that we wish to pass AD through:
+
+```@example custom
+function program(x)
+    y = sin.(x)
+    p = ()
+    z = external(y, p)
+    w = 5 * z
+    return w
+end
+```
+
+Again, we assume that external is not AD compatible, so we modify this function with the `provide_rule` function provided in this package.
+
+```@example custom
+function modprogram(x)
+    y = sin.(x)
+    p = ()
+    z = provide_rule(external, y, p, "ffd")
+    w = 5 * z
+    return w
+end
+```
+
+The last argument we provided is the mode, which can be either:
+- "ffd": forward finite differencing
+- "cfd": central finite differencing
+- "cs": complex step
+- "jacobian": you provide `J = jacobian(x, p)`, use also keyword jacobian
+- "vp": you provide Jacobian vector product `jvp(x, p, v)` and vector Jacobian product `vjp(x, p, v)` see keywords `jvp` and `vjp`
+
+We can now use ForwardDiff or ReverseDiff and just the external code will be finite differenced (since we chose "ffd" above), and inserted into the AD chain.  Since this example is actually AD compatible everywhere we compare to using ForwardDiff through everything.
+
+```@example custom
+x = [1.0; 2.0; 3.0]
+Jtrue = ForwardDiff.jacobian(program, x) 
+J1 = ForwardDiff.jacobian(modprogram, x)
+J2 = ReverseDiff.jacobian(modprogram, x)
+
+println(Jtrue)
+println(maximum(abs.(Jtrue - J1)))
+println(maximum(abs.(Jtrue - J2)))
+```
+
+Central difference and complex step work similarly.  The example, below shows how to provide the Jacobian.
+
+```@example custom
+using LinearAlgebra: diagm, I
+
+function jacobian(x, p)
+    dydx = diagm(2*x)
+    dzdx = [I; dydx]
+    return dzdx
+end
+
+function modprogram(x)
+    y = sin.(x)
+    p = ()
+    z = provide_rule(external, y, p, "jacobian"; jacobian)
+    w = 5 * z
+    return w
+end
+
+J1 = ForwardDiff.jacobian(modprogram, x)
+J2 = ReverseDiff.jacobian(modprogram, x)
+println(maximum(abs.(Jtrue - J1)))
+println(maximum(abs.(Jtrue - J2)))
+```
+
+Finally, we show how to provide JVPs and VJPs.
+
+```@example custom
+
+function jvp(x, p, v)
+    nx = length(x)
+    return [v; 2*x.*v]
+end
+
+function vjp(x, p, v)
+    nx = length(x)
+    return v[1:nx] .+ 2*x.*v[nx+1:end]
+end
+
+function modprogram(x)
+    y = sin.(x)
+    p = ()
+    z = provide_rule(external, y, p, "vp"; jvp, vjp)
+    w = 5 * z
+    return w
+end
+
+J1 = ForwardDiff.jacobian(modprogram, x)
+J2 = ReverseDiff.jacobian(modprogram, x)
+println(maximum(abs.(Jtrue - J1)))
+println(maximum(abs.(Jtrue - J2)))
+```

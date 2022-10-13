@@ -4,7 +4,7 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/dev/)
 [![Build Status](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-**Summary**: Make implicit functions compatible with algorithmic differentiation without differenting inside the solvers.
+**Summary**: Make implicit functions compatible with algorithmic differentiation without differenting inside the solvers. Also allow for custom rules with explicit functions.
 
 **Author**: Andrew Ning
 
@@ -15,6 +15,8 @@
 - Simple drop in functionality
 - Customizable subfunctions to accomodate different use cases
 - Version for linear systems to provide symbolic partials automatically (again works with any linear solve whether or not it was already overloaded for AD)
+- Version for 1D residuals
+- Can provide custom rules to be inserted into the AD chain. Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).
 
 **Motivation**:
 

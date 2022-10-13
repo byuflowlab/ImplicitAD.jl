@@ -5,4 +5,6 @@ There are just two exported function in this package, but each has multiple opti
 ```@docs
 implicit_function
 implicit_linear_function
+apply_factorization
+custom_rule
 ```

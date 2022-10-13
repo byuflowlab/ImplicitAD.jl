@@ -1,5 +1,7 @@
 # Theory
 
+## Implicit Equations
+
 We can get to the derivatives we are after by using implicit differentiation. Recall that we are solving:
 ``r(x, y(x)) = 0`` and that we want ``dy/dx``.  Using the chain rule we find that:
 ```math
@@ -91,7 +93,7 @@ In summary the operations are:
 1) Solve the linear system: ``A^T u = \bar{y}`` for the upstream input ``\bar{y}`` where ``A = \partial r / \partial y``.
 2) Compute the VJP: ``\bar{x} = -B^T u`` where ``B = \partial r/\partial x``.
 
-### Linear Equations
+## Linear Equations
 
 For linear residuals the above nonlinear formulation will of course work, but we can provide partial derivatives symbolically.  This will be more efficient rather than relying on AD to compute these partials, or will make it easier on the user to not have to manually provide these.
 
@@ -213,4 +215,42 @@ from which we easily get the desired derivatives for the revsere mode pullback o
 \end{aligned}
 ```
 Note that we should again save the factorization for ``A`` from the primal solve to reuse in this second linear solve.
+
+## Custom Rules
+
+Consider now (typically explicit) functions of the form: `y = func(x, p)` where `x` are variables and `p` are fixed parameters.
+
+#### Forward
+
+The derivatives we are after are:
+```math
+\frac{d y_i}{d \xi_j} = \frac{d y_i}{d x_k} \frac{d x_k}{d \xi_j}
+```
+or in our notation
+```math
+\ydot = J \xdot
+```
+where ``\xdot`` is known at this stage of the AD chain.
+
+A user may be able to provide the Jacobian or the Jacobian-vector product directly.  If not, we can use finite differencing on complex step.  
+
+A typical use case where one might resort to finite differencing is when calling a function from another language where we cannot propagate AD through (but where the rest of our code is AD-compatible and we want to insert the derivatives of this external call into the AD workflow).  Thus, we make the assumption that the function call `func` is expensive relative to the matrix operations.  
+
+In the case of finite differencing and complex step we have a choice.  We are actually computing a Jacobian-Jacobian product, so we could either compute the Jacobian ``J`` first, which scales with the dimension of ``x`` (each index k from equation above).  Or, we can compute the Jacobian vector product for each ``\xi``, which scales with the dimension of ``\xi`` (over index j).   We compare the size of ``x`` and ``\xi`` and choose the smaller number of function calls in this implementation.  This choice is rarely applicable in regular AD since ``n_x`` is generally only of size 1 or maybe 2 as rules are applied to individual operations.  But in this scenario the external call `func` is generally much more complex.
+
+#### Reverse
+
+Reverse is similar:
+```math
+\frac{d \xi_j}{d x_k} = \frac{d y_i}{d x_k} \frac{d xi_j}{d y_i}
+```
+or in our notation
+```math
+\xbar = J^T \ybar
+```
+where ``\ybar`` is known at this stage of the AD chain (though generally given for just one value of ``\xi`` at a time).
+
+In this case the user can again provide the Jacobian or the vector-Jacobian product (v^T J), or we can use finite differencing on complex step.  
+
+Finite differencing and complex step only work in a forward manner and so we cannot compute the VJP directly, the only option in revese mode is to construct the Jacobian via finite differencing and then multiply.  If we had the whole Jacobian ``\xbar`` available we could actually perform a JVP for each ``y_i``.  However, the pullbacks only provide the opposite as noted above.
 

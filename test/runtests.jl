@@ -4,7 +4,7 @@ using NLsolve
 using ForwardDiff
 using ReverseDiff
 using FiniteDiff
-using LinearAlgebra: Symmetric, factorize
+using LinearAlgebra: Symmetric, factorize, diagm
 using SparseArrays: sparse
 using FLOWMath: brent
 
@@ -252,6 +252,16 @@ end
     residual(y, x, p) = y/x[1] + x[2]*cos(y)
     solve(x, p) = brent(y -> residual(y, x, p), p[1], p[2])[1]
 
+    function test_orig(x) 
+        yl = -3.0
+        yu = 3.0
+        p = [yl, yu]
+        x[1] *= 3
+        y = solve(x, p)
+        z = [y; (x[2]+3)^2]
+        return z
+    end
+
     function test(x) 
         yl = -3.0
         yu = 3.0
@@ -263,8 +273,162 @@ end
     end
     
     xv = [0.5, 1.0]
-    test(xv)
+    # test(xv)
 
-    ForwardDiff.jacobian(test, xv)
+    J1 = ForwardDiff.jacobian(test_orig, xv)
+    J2 = ForwardDiff.jacobian(test, xv)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+
+end
+
+@testset "provide partials" begin
+   
+    function yo(x, p)
+        y = x.^2
+        z = 3*y
+        w = cos.(z)
+        # w[1] += z[2]
+        b = w .+ [z[2]/10; zeros(length(w)-1)]
+        return b
+    end
     
+    function yo2(x, p)
+        y = x.^3
+        z = [sin.(y); y[1]/1000]
+        w = exp.(z)
+        return w
+    end
+    
+    function jacobian(x, p)
+        y = x.^3
+        z = [sin.(y); y[1]/1000]
+        w = exp.(z)
+        dydx = diagm(3*x.^2)
+        dzdy = [diagm(cos.(y)); 1.0/1000 zeros(length(y)-1)']
+        dzdx = dzdy*dydx
+        dwdz = diagm(exp.(z))
+        dwdx = dwdz*dzdx
+    
+        return dwdx
+    end
+    
+    function jvp(x, p, v)
+        # dwdx*v = dwdz*dzdy*dydx*v
+        y = x.^3
+        z = [sin.(y); y[1]/1000]
+        w = exp.(z)
+    
+        v = @. 3*x^2 * v  # dydx*v
+        v = @. [cos(y) * v; v[1]/1000]  # dzdy*newv
+        v = @. exp(z) * v #dwdz*newv
+    
+        return v
+    end
+    
+    function vjp(x, p, v)
+        # v'*dwdx = v'*dwdz*dzdy*dydx
+        y = x.^3
+        z = [sin.(y); y[1]/1000]
+        w = exp.(z)
+    
+        v = @. v * exp(z)  # v'*dwdz
+        v = [v[1]*cos(y[1]) + v[end]/1000; v[2:end-1] .* cos.(y[2:end])]  # newv'*dzdy
+        v = @. v * 3*x^2  # newv'*dydx
+    
+        return v
+    end
+    
+    function program(x)
+        p = ()
+        w = yo(x, p)
+        w2 = [w; w; w]
+        v = yo2(w2, p)
+        return v .+ w[2]
+    end
+    
+    function modprogram(x, mode, jacobian=nothing, jvp=nothing, vjp=nothing)
+        p = ()
+        w = yo(x, p)
+        w2 = [w; w; w]
+        v = provide_rule(yo2, w2, p, mode; jacobian, jvp, vjp)
+        return v .+ w[2]
+    end
+    
+    function program2(x)
+        p = ()
+        w = yo(x, p)
+        w2 = [w[1]; w[2]]
+        v = yo2(w2, p)
+        return v .+ w[2]
+    end
+    
+    function modprogram2(x, mode)
+        p = ()
+        w = yo(x, p)
+        w2 = [w[1]; w[2]]
+        v = provide_rule(yo2, w2, p, mode)
+        return v .+ w[2]
+    end
+    
+    
+    x = [1.0, 2.0, 3.0]
+    
+    mode = "ffd"
+    J1 = ForwardDiff.jacobian(program, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-4))
+    
+    J1 = ForwardDiff.jacobian(program2, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram2(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-4))
+    
+    J1 = ReverseDiff.jacobian(program, x)
+    J2 = ReverseDiff.jacobian(xt -> modprogram(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-4))
+    
+    mode = "cfd"
+    J1 = ForwardDiff.jacobian(program, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-7))
+    
+    J1 = ForwardDiff.jacobian(program2, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram2(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-7))
+    
+    J1 = ReverseDiff.jacobian(program, x)
+    J2 = ReverseDiff.jacobian(xt -> modprogram(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-7))
+    
+    mode = "cs"
+    J1 = ForwardDiff.jacobian(program, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+    
+    J1 = ForwardDiff.jacobian(program2, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram2(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+    
+    J1 = ReverseDiff.jacobian(program, x)
+    J2 = ReverseDiff.jacobian(xt -> modprogram(xt, mode), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+    
+    mode = "jacobian"
+    J1 = ForwardDiff.jacobian(program, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram(xt, mode, jacobian), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+
+    J1 = ReverseDiff.jacobian(program, x)
+    J2 = ReverseDiff.jacobian(xt -> modprogram(xt, mode, jacobian), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+    
+    mode = "vp"
+    J1 = ForwardDiff.jacobian(program, x)
+    J2 = ForwardDiff.jacobian(xt -> modprogram(xt, mode, jacobian, jvp), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+    
+    J1 = ReverseDiff.jacobian(program, x)
+    J2 = ReverseDiff.jacobian(xt -> modprogram(xt, mode, jacobian, jvp, vjp), x)
+    @test all(isapprox.(J1, J2, rtol=1e-15))
+        
+
 end

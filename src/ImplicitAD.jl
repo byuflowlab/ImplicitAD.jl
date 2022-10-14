@@ -174,8 +174,11 @@ ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::AbstractVector{<:
 # ------ linear case ------------
 
 """
+    apply_factorization(A, factfun)
+
 Apply a matrix factorization to the primal portion of a dual number.
-Avoids user from needing to add ForwardDiff as a dependency.
+Avoids user from needing to add ForwardDiff as a dependency.  
+`Afactorization = factfun(A)`
 """
 function apply_factorization(A::AbstractArray{<:ForwardDiff.Dual{T}}, factfun) where {T}
     Av = fd_value(A)
@@ -289,7 +292,7 @@ ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, Abstrac
 # -------------- non AD-able operations ------------------------
 
 """
-    provide_rule(func, x, p, mode="ffd"; jacobian=nothing, jvp=nothing, vjp=nothing) = provide_rule(func, x, p, mode, jacobian, jvp, vjp)
+    provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothing)
 
 Provide partials rather than rely on AD.  For cases where AD is not available 
 or to provide your own rule, or to use mixed mode, etc.
@@ -301,12 +304,12 @@ or to provide your own rule, or to use mixed mode, etc.
     - "cfd": central finite difference
     - "cs": complex step
     - "jacobian": provide your own jacobian (see jacobian function)
-    - "vector product": provide jacobian vector product and vector jacobian product (see jvp and vjp)
+    - "vp": provide jacobian vector product and vector jacobian product (see jvp and vjp)
 - `jacobian::function`: only used if mode="jacobian". J = jacobian(x, p) provide J_ij = dy_i / dx_j
 - `jvp::function`: only used if mode="vp" and in forward mode. ydot = jvp(x, p, v) provide Jacobian vector product J*v
 - `vjp::function`: only used if mode="vp" and in revese mode. xbar = vjp(x, p, v) provide vector Jacobian product v'*J
 """
-provide_rule(func, x, p, mode="ffd"; jacobian=nothing, jvp=nothing, vjp=nothing) = provide_rule(func, x, p, mode, jacobian, jvp, vjp)
+provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothing) = provide_rule(func, x, p, mode, jacobian, jvp, vjp)
 
 provide_rule(func, x, p, mode, jacobian, jvp, vjp) = func(x, p)
 

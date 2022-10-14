@@ -37,7 +37,7 @@ or modified in place:
 
 The input x should be a vector, and p is a tuple of fixed parameters.  The state and corresponding residuals, y and r, can be vectors or scalars (for 1D residuals).  The subfunctions are overloaded to handle both cases efficiently.
 
-Limitation: ReverseDiff does not currently support compiling the tape for custome rules.  See this issue in ReverseDiff: https://github.com/JuliaDiff/ReverseDiff.jl/issues/187
+Limitation: ReverseDiff does not currently support compiling the tape for custome rules.  See this issue in ReverseDiff: <https://github.com/JuliaDiff/ReverseDiff.jl/issues/187>
 
 ## Basic Usage
 
@@ -103,15 +103,15 @@ println("max abs difference = ", maximum(abs.(J1 - J2)))
 
 ## Overloading Subfunctions
 
-If the user can provide (or lazily compute) their own partial derivatives for ``\partial{r}/\partial{y}`` then they can provide their own subfunction:
+If the user can provide (or lazily compute) their own partial derivatives for ∂r/∂y then they can provide their own subfunction:
 `∂r∂y = drdy(residual, y, x, p)` (where `r = residual(y, x, p)`).  The default implementation computes these partials with ForwardDiff. Some examples where one may wish to override this behavior are for cases significant sparsity (e.g., using SparseDiffTools), for a large number of residuals (e.g., preallocating this Jacobian), or to provide a specific matrix factorization.
 
 Additionally the user can override the linear solve:
-`x = lsolve(A, b)`.  The default is the backslash operator.  One example where a user may wish to override is to use matrix-free Krylov methods for large systems (in connection with the computation for ∂r∂y).
+`x = lsolve(A, b)`.  The default is the backslash operator.  One example where a user may wish to override is to use matrix-free Krylov methods for large systems (in connection with the computation for ∂r/∂y).
 
 The other partials, ∂r/∂x, are not computed directly, but rather are used in efficient Jacobian vector (or vector Jacobian) products.
 
-As an example, let's continue the same problem from the previous section.  We note that we can provide the Jacobian ``\partial r/\partial y`` analytically and so we will skip the internal ForwardDiff implementation. We provide our own function for `drdy`, and we will preallocate so we can modify the Jacobian in place:
+As an example, let's continue the same problem from the previous section.  We note that we can provide the Jacobian ∂r/∂y analytically and so we will skip the internal ForwardDiff implementation. We provide our own function for `drdy`, and we will preallocate so we can modify the Jacobian in place:
 
 ```@example basic
 function drdy(residual, y, x, p, A)
@@ -255,6 +255,9 @@ The last argument we provided is the mode, which can be either:
 We can now use ForwardDiff or ReverseDiff and just the external code will be finite differenced (since we chose "ffd" above), and inserted into the AD chain.  Since this example is actually AD compatible everywhere we compare to using ForwardDiff through everything.
 
 ```@example custom
+using ForwardDiff
+using ReverseDiff
+
 x = [1.0; 2.0; 3.0]
 Jtrue = ForwardDiff.jacobian(program, x) 
 J1 = ForwardDiff.jacobian(modprogram, x)

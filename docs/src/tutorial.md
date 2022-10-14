@@ -238,7 +238,7 @@ using ImplicitAD
 function modprogram(x)
     y = sin.(x)
     p = ()
-    z = provide_rule(external, y, p, "ffd")
+    z = provide_rule(external, y, p; mode="ffd")
     w = 5 * z
     return w
 end
@@ -282,7 +282,7 @@ end
 function modprogram(x)
     y = sin.(x)
     p = ()
-    z = provide_rule(external, y, p, "jacobian"; jacobian)
+    z = provide_rule(external, y, p; mode="jacobian", jacobian)
     w = 5 * z
     return w
 end
@@ -310,7 +310,7 @@ end
 function modprogram(x)
     y = sin.(x)
     p = ()
-    z = provide_rule(external, y, p, "vp"; jvp, vjp)
+    z = provide_rule(external, y, p; mode="vp", jvp, vjp)
     w = 5 * z
     return w
 end

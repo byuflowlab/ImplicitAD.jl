@@ -350,7 +350,7 @@ end
         p = ()
         w = yo(x, p)
         w2 = [w; w; w]
-        v = provide_rule(yo2, w2, p, mode; jacobian, jvp, vjp)
+        v = provide_rule(yo2, w2, p; mode, jacobian, jvp, vjp)
         return v .+ w[2]
     end
     
@@ -366,7 +366,7 @@ end
         p = ()
         w = yo(x, p)
         w2 = [w[1]; w[2]]
-        v = provide_rule(yo2, w2, p, mode)
+        v = provide_rule(yo2, w2, p; mode)
         return v .+ w[2]
     end
     

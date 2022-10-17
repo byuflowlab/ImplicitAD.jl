@@ -37,9 +37,9 @@ That same functionality is useful also in cases where a function is already AD c
 
 **Documentation**:
 
-- Start with the [tutorial](tutorial.md) to learn usage.
-- The API is described in the [reference](reference.md) page.
-- The math is particularly helpful for those wanting to provide their own custom subfunctions. See the [theory](theory.md) page.
+- Start with the tutorial to learn usage.  
+- The API is described in the reference page.
+- The math is particularly helpful for those wanting to provide their own custom subfunctions. See the theory page.
 
 **Run Unit Tests**:
 

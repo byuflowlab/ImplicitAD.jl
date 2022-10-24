@@ -1,7 +1,7 @@
 name = "ImplicitAD"
 uuid = "e7cbb90b-9b31-4eb2-a8c8-45099c074ee1"
 authors = ["Andrew Ning <aning@byu.edu> and contributors"]
-version = "0.2.1"
+version = "0.2.2"
 
 [deps]
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
@@ -10,7 +10,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
 
 [compat]
-julia = "1.8"
+julia = "1.6"
 ChainRulesCore = "1.15"
 ForwardDiff = "0.10.30"
 ReverseDiff = "1.14"

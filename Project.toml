@@ -11,9 +11,9 @@ ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
 
 [compat]
 julia = "1.6"
-ChainRulesCore = "1"
-ForwardDiff = "0.10"
-ReverseDiff = "1"
+ChainRulesCore = "1.15"
+ForwardDiff = "0.10.30"
+ReverseDiff = "1.14"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

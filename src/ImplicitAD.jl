@@ -19,7 +19,7 @@ fd_partials(x) = reduce(vcat, transpose.(ForwardDiff.partials.(x)))
 """
 unpack ForwardDiff Dual return value and derivative.
 """
-function unpack_dual(x) 
+function unpack_dual(x)
     xv = fd_value(x)
     dx = fd_partials(x)
     return xv, dx
@@ -31,6 +31,69 @@ Create a ForwardDiff Dual with value yv, derivatives dy, and Dual type T
 pack_dual(yv::AbstractFloat, dy, T) = ForwardDiff.Dual{T}(yv, ForwardDiff.Partials(Tuple(dy)))
 pack_dual(yv::AbstractVector, dy, T) = ForwardDiff.Dual{T}.(yv, ForwardDiff.Partials.(Tuple.(eachrow(dy))))
 
+# ------- In-Place Unpack/Pack ForwardDiff Dual ------
+fd_value!(val, x::AbstractArray) = map!(ForwardDiff.value, val, x)
+
+# base case 1: No partials (not a Dual number)
+fd_partials!(partials::AbstractArray, x) where {M} = (partials .= 0)
+
+# base case 2: Dual number
+function fd_partials!(partials::AbstractVector, x::ForwardDiff.Dual{<:Any, <:Any, N}) where {N}
+    # error case
+    @assert length(partials)==N "Invalid partials array: expected length $N, got $(length(partials))"
+
+    partials .= x.partials
+
+    return partials
+end
+
+# array case
+"""
+    fd_partials!(partials::AbstractArray, x::AbstractArray{<:ForwardDiff.Dual})
+
+Store the partials of `x` in `partials`, such that `partials[i, j, ..., :]`
+are the partials of `x[i, j, ...]`
+
+```@example
+import ForwardDiff: Dual
+
+x = [Dual(1.0, 1.5, 2.0), Dual(3, 3.5, 4.0), Dual(5,5.5,6.0), Dual(7,7.5,8.0)]
+
+partials = zeros(size(x)..., eltype(x).parameters[3])
+
+ImplicitAD.fd_partials!(partials, x)
+```
+
+```@example
+import ForwardDiff: Dual
+
+x = [ Dual(1, 1.25, 1.5, 1.75, 2.0) Dual(2, 2.25, 2.5, 2.75, 3.0) Dual(3, 3.25, 3.5, 3.75, 4.0) Dual(4, 4.25, 4.5, 4.75, 5.0)
+      Dual(5, 5.25, 5.5, 5.75, 6.0) Dual(6, 6.25, 6.5, 6.75, 7.0) Dual(7, 7.25, 7.5, 7.75, 8.0) Dual(8, 8.25, 8.5, 8.75, 9.0) ]
+
+partials = zeros(size(x)..., eltype(x).parameters[3])
+
+ImplicitAD.fd_partials!(partials, x)
+```
+"""
+function fd_partials!(partials::AbstractArray{<:Any, M},
+                        x::AbstractArray{<:ForwardDiff.Dual{<:Any, <:Any, N}, L}) where {M, N, L}
+
+    # error cases
+    @assert M == L+1 "partials array expected to have $(L+1) dimensions; got M=$M"
+    for l in 1:L
+        @assert size(partials, l)==size(x, l) "partials array expected to have size (tuple(size(x)..., N)); got $(size(partials))"
+    end
+    @assert size(partials, M)==N "partials array expected to have size (tuple(size(x)..., N)); got $(size(partials))"
+
+    ind = CartesianIndices(size(partials)[1:end-1])
+
+    for (i, dual) in enumerate(x)
+        partials[ind[i], :] .= dual.partials
+    end
+
+    return partials
+end
+
 # -----------------------------------------
 
 # ---------- core methods -----------------
@@ -40,12 +103,12 @@ Compute Jacobian vector product b = -B*xdot where B_ij = ∂r_i/∂x_j
 This takes in the dual directly for x = (xv, xdot) since it is already formed that way.
 """
 function jvp(residual, y, xd, p)
-    
+
     # evaluate residual function
     rd = residual(y, xd, p)  # constant y
-    
+
     # extract partials
-    b = -fd_partials(rd) 
+    b = -fd_partials(rd)
 
     return b
 
@@ -104,7 +167,7 @@ function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_sol
     # ---- check for in-place version and wrap as needed -------
     new_residual = residual
     if applicable(residual, 1.0, 1.0, 1.0, 1.0)  # in-place
-        
+
         function residual_wrap(yw, xw, pw)  # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
             T = promote_type(eltype(xw), eltype(yw))
             rw = zeros(T, length(yw))  # match type of input variables
@@ -113,7 +176,7 @@ function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_sol
         end
         new_residual = residual_wrap
     end
-    
+
     return implicit(solve, new_residual, x, p, drdy, lsolve)
 end
 
@@ -124,20 +187,20 @@ implicit(solve, residual, x, p, drdy, lsolve) = solve(x, p)
 
 
 
-# Overloaded for ForwardDiff inputs, providing exact derivatives using 
+# Overloaded for ForwardDiff inputs, providing exact derivatives using
 # Jacobian vector product.
 function implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, drdy, lsolve) where {T}
-    
+
     # evaluate solver
     xv = fd_value(x)
     yv = solve(xv, p)
-    
+
     # solve for Jacobian-vector product
     b = jvp(residual, yv, x, p)
 
     # comptue partial derivatives
     A = drdy(residual, yv, xv, p)
-    
+
     # linear solve
     ydot = lsolve(A, b)
 
@@ -177,7 +240,7 @@ ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::AbstractVector{<:
     apply_factorization(A, factfun)
 
 Apply a matrix factorization to the primal portion of a dual number.
-Avoids user from needing to add ForwardDiff as a dependency.  
+Avoids user from needing to add ForwardDiff as a dependency.
 `Afactorization = factfun(A)`
 """
 function apply_factorization(A::AbstractArray{<:ForwardDiff.Dual{T}}, factfun) where {T}
@@ -194,7 +257,7 @@ apply_factorization(A) = apply_factorization(A, factorize)
 
 
 """
-    implicit_linear(A, b; lsolve=linear_solve, fact=factorize)
+    implicit_linear(A, b; lsolve=linear_solve, Af=factorize)
 
 Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
 This version is for linear equations Ay = b
@@ -206,32 +269,71 @@ This version is for linear equations Ay = b
 """
 implicit_linear(A, b; lsolve=linear_solve, Af=nothing) = implicit_linear(A, b, lsolve, Af)
 
+"""
+    implicit_linear!(y, A, b; lsolve=linear_solve, Af=factorize)
+
+Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
+This version is for linear equations Ay = b, computed in-place and stored in `y`.
+
+# Arguments
+- `y::vector`, `A::matrix`, `b::vector`: components of linear system ``A y = b``
+- `lsolve::function`: lsolve(A, b). Function to solve the linear system, default is backslash operator.
+- `Af::factorization`: An optional factorization of A, useful to override default factorize, or if multiple linear solves will be performed with same A matrix.
+"""
+implicit_linear!(y, A, b; lsolve=linear_solve, Af=nothing) = implicit_linear!(y, A, b, lsolve, Af)
+
 
 # If no AD, just solve normally.
 implicit_linear(A, b, lsolve, Af) = isnothing(Af) ? lsolve(A, b) : lsolve(Af, b)
+implicit_linear!(y, A, b, lsolve, Af) = isnothing(Af) ? lsolve(y, A, b) : lsolve(y, Af, b)
 
 # catch three cases where one or both contain duals
 implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, Af) where {T} = linear_dual(A, b, lsolve, Af, T)
 implicit_linear(A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, Af) where {T} = linear_dual(A, b, lsolve, Af, T)
 implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, Af) where {T} = linear_dual(A, b, lsolve, Af, T)
+implicit_linear!(y::AbstractArray{<:ForwardDiff.Dual{T}}, A::AbstractArray{<:ForwardDiff.Dual{T}}, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, Af) where {T} = linear_dual!(y, A, b, lsolve, Af, T)
+implicit_linear!(y::AbstractArray{<:ForwardDiff.Dual{T}}, A, b::AbstractArray{<:ForwardDiff.Dual{T}}, lsolve, Af) where {T} = linear_dual!(y, A, b, lsolve, Af, T)
+implicit_linear!(y::AbstractArray{<:ForwardDiff.Dual{T}}, A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, Af) where {T} = linear_dual!(y, A, b, lsolve, Af, T)
 
 # Both A and b contain duals
 function linear_dual(A, b, lsolve, Af, T)
-    
+
     # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
     bv = fd_value(b)
 
     # save factorization since we will perform two linear solves
     Afact = isnothing(Af) ? factorize(fd_value(A)) : Af
-    
+
     # evaluate linear solver
     yv = lsolve(Afact, bv)
-    
+
     # extract Partials of b - A * y  i.e., bdot - Adot * y  (since y does not contain duals)
     rhs = fd_partials(b - A*yv)
-    
+
     # solve for new derivatives
     ydot = lsolve(Afact, rhs)
+
+    # repack in ForwardDiff Dual
+    return pack_dual(yv, ydot, T)
+end
+
+function linear_dual!(bv, yv, rhs, ydot, A, b, lsolve, Af, T)
+
+    # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
+    fd_value!(bv, b)
+
+    # save factorization since we will perform two linear solves
+    Afact = isnothing(Af) ? factorize(fd_value(A)) : Af
+
+    # evaluate linear solver
+    lsolve(yv, Afact, bv)
+
+    # extract Partials of b - A * y  i.e., bdot - Adot * y  (since y does not contain duals)
+    # rhs = fd_partials(b - A*yv)
+    map!( (Arow, bel) -> ForwardDiff.partials(bel - Arow*yv), rhs, eachrow(A), b)
+
+    # solve for new derivatives
+    lsolve(ydot, Afact, rhs)
 
     # repack in ForwardDiff Dual
     return pack_dual(yv, ydot, T)
@@ -246,7 +348,7 @@ function ChainRulesCore.rrule(::typeof(implicit_linear), A, b, lsolve, Af)
 
     # evaluate solver
     y = lsolve(Afact, b)
-    
+
     function implicit_pullback(ybar)
         u = lsolve(Afact', ybar)
         return NoTangent(), -u*y', u, NoTangent(), NoTangent()
@@ -267,21 +369,21 @@ ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, Abstrac
 # end
 
 # function implicit_linear_inplace(A, b, y::AbstractVector{<:ForwardDiff.Dual{T}}, Af) where {T}
-    
+
 #     # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
 #     bv = fd_value(b)
 #     yv, ydot = unpack_dual(y)
 
 #     # save factorization since we will perform two linear solves
 #     Afact = isnothing(Af) ? factorize(fd_value(A)) : Af
-    
+
 #     # evaluate linear solver
 #     ldiv!(yv, Afact, bv)
-    
+
 #     # extract Partials of b - A * y  i.e., bdot - Adot * y  (since y does not contain duals)
 #     rhs = fd_partials(b - A*yv)
-    
-#     # solve for new derivatives    
+
+#     # solve for new derivatives
 #     ldiv!(ydot, Afact, rhs)
 
 #     # reassign y to this value
@@ -294,12 +396,12 @@ ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, Abstrac
 """
     provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothing)
 
-Provide partials rather than rely on AD.  For cases where AD is not available 
+Provide partials rather than rely on AD.  For cases where AD is not available
 or to provide your own rule, or to use mixed mode, etc.
 
 # Arguments
 - `func::function`, `x::vector{float}`, `p::tuple`:  function of form: y = func(x, p), where x are variables and p are fixed parameters.
-- `mode::string`: 
+- `mode::string`:
     - "ffd": forward finite difference
     - "cfd": central finite difference
     - "cs": complex step
@@ -314,7 +416,7 @@ provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothi
 provide_rule(func, x, p, mode, jacobian, jvp, vjp) = func(x, p)
 
 function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, jacobian, jvp, vjp) where {T}
-    
+
     # unpack dual
     xv, xdot = unpack_dual(x)
     nx, nd = size(xdot)
@@ -325,20 +427,20 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
 
     # initialize
     ydot = Matrix{Float64}(undef, ny, nd)
-    
+
     if mode == "ffd"  # forward finite diff
 
         h = sqrt(eps(Float64))  # theoretical optimal (absolute) step size
-    
+
         # check whether we should do a series of JVPs or compute Jacobian than multiply
-        
+
         if nd <= nx  # do JVPs (for each dual)
             xnew = Vector{Float64}(undef, nx)
             for i = 1:nd
                 xnew .= xv + h*xdot[:, i]  # directional derivative
                 ydot[:, i] = (func(xnew, p) - yv)/h
             end
-        
+
         else  # compute Jacobian first
             J = Matrix{Float64}(undef, ny, nx)
             for i = 1:nx
@@ -349,13 +451,13 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
             end
             ydot .= J * xdot
         end
-    
+
     elseif mode == "cfd"  # central finite diff
 
         h = cbrt(eps(Float64))  # theoretical optimal (absolute) step size
-    
+
         # check whether we should do a series of JVPs or compute Jacobian than multiply
-        
+
         if nd <= nx  # do JVPs
             xnew = Vector{Float64}(undef, nx)
             for i = 1:nd
@@ -365,7 +467,7 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
                 ym = func(xnew, p)
                 ydot[:, i] = (yp - ym)/(2*h)
             end
-        
+
         else  # compute Jacobian first
             J = Matrix{Float64}(undef, ny, nx)
             for i = 1:nx
@@ -381,18 +483,18 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
         end
 
     elseif mode == "cs"  # complex step
-        
+
         h = 1e-30
         xnew = Vector{ComplexF64}(undef, nx)
-    
+
         # check whether we should do a series of JVPs or compute Jacobian than multiply
-        
+
         if nd <= nx  # do JVPs (for each dual)
             for i = 1:nd
                 xnew .= xv + h*im*xdot[:, i]  # directional derivative
                 ydot[:, i] = imag(func(xnew, p))/h
             end
-        
+
         else  # compute Jacobian first
             J = Matrix{Float64}(undef, ny, nx)
             xnew .= xv
@@ -427,7 +529,7 @@ function ChainRulesCore.rrule(::typeof(provide_rule), func, x, p, mode, jacobian
     y = func(x, p)
     nx = length(x)
     ny = length(y)
-    
+
     if mode == "vp"
 
         function vppullback(ybar)
@@ -436,7 +538,7 @@ function ChainRulesCore.rrule(::typeof(provide_rule), func, x, p, mode, jacobian
         end
         return y, vppullback
     end
-        
+
     J = Matrix{Float64}(undef, ny, nx)
 
     if mode == "ffd"
@@ -474,7 +576,7 @@ function ChainRulesCore.rrule(::typeof(provide_rule), func, x, p, mode, jacobian
         end
 
     elseif mode == "jacobian"
-        
+
         J .= jacobian(x, p)
 
     else

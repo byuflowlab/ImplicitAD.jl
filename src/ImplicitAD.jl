@@ -92,11 +92,10 @@ linear_solve(A::Number, b) = b / A  # scalar division for 1D case
 Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
 
 # Arguments
-- `solve::function`: y = solve(x, p). Solve implicit function returning state variable y, for input variables x, and fixed parameters p.
+- `solve::function`: y = solve(x, p) or y, drdy = solve(x, p). Solve implicit function returning state variables y and (optionally) the partial derivatives ∂r_i/∂y_j, for input variables x, and fixed parameters p.  If not provided, the partial derivatives will be computed using forward-mode AD.
 - `residual::function`: Either r = residual(y, x, p) or in-place residual!(r, y, x, p). Set residual r (scalar or vector), given state y (scalar or vector), variables x (vector) and fixed parameters p (tuple).
 - `x::vector{float}`: evaluation point.
 - `p::tuple`: fixed parameters. default is empty tuple.
-- `drdy::function`: drdy(residual, y, x, p).  Provide (or compute yourself): ∂r_i/∂y_j.  Default is forward mode AD.
 - `lsolve::function`: lsolve(A, b).  Linear solve A x = b  (where A is computed in drdy and b is computed in jvp, or it solves A^T x = c where c is computed in vjp).  Default is backslash operator.
 """
 function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_solve)
@@ -117,12 +116,8 @@ function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_sol
     return implicit(solve, new_residual, x, p, drdy, lsolve)
 end
 
-
-
 # If no AD, just solve normally.
 implicit(solve, residual, x, p, drdy, lsolve) = solve(x, p)
-
-
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using 
 # Jacobian vector product.
@@ -130,14 +125,20 @@ function implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, 
     
     # evaluate solver
     xv = fd_value(x)
-    yv = solve(xv, p)
-    
+    result = solve(xv, p)
+
+    # compute partial derivatives
+    if result isa Tuple
+        yv = out[1]
+        A = out[2]
+    else
+        yv = result
+        A = drdy(residual, yv, xv, p)
+    end
+
     # solve for Jacobian-vector product
     b = jvp(residual, yv, x, p)
 
-    # comptue partial derivatives
-    A = drdy(residual, yv, xv, p)
-    
     # linear solve
     ydot = lsolve(A, b)
 
@@ -145,15 +146,20 @@ function implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, 
     return pack_dual(yv, ydot, T)
 end
 
-
 # Provide a ChainRule rule for reverse mode
 function ChainRulesCore.rrule(::typeof(implicit), solve, residual, x, p, drdy, lsolve)
 
     # evaluate solver
     y = solve(x, p)
 
-    # comptue partial derivatives
-    A = drdy(residual, y, x, p)
+    # compute partial derivatives
+    if result isa Tuple
+        yv = out[1]
+        A = out[2]
+    else
+        yv = result
+        A = drdy(residual, yv, xv, p)
+    end
 
     function pullback(ybar)
         u = lsolve(A', ybar)

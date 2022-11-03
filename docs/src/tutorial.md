@@ -72,7 +72,7 @@ end
 nothing # hide
 ```
 
-Now if we tried to run `ForwardDiff.jacobian(program, x)` it will not work.  It's not compatible with the internals of NLSolve, but even if it were it would be an inefficient way to compute the derivatives.  We now need to modify this script to use our package.  Here is what the modified `program` function will look like.
+Now if we tried to run `ForwardDiff.jacobian(program, x)` it will not work (actually it will work if we change the type of our starting point ``x_0`` to also be a Dual).  But even for solvers where we can propagate AD through it would typically be an inefficient way to compute the derivatives.  We now need to modify this script to use our package.  Here is what the modified `program` function will look like.
 
 ```@example basic
 using ImplicitAD
@@ -104,10 +104,10 @@ println("max abs difference = ", maximum(abs.(J1 - J2)))
 ## Overloading Subfunctions
 
 If the user can provide (or lazily compute) their own partial derivatives for ∂r/∂y then they can provide their own subfunction:
-`∂r∂y = drdy(residual, y, x, p)` (where `r = residual(y, x, p)`).  The default implementation computes these partials with ForwardDiff. Some examples where one may wish to override this behavior are for cases significant sparsity (e.g., using SparseDiffTools), for a large number of residuals (e.g., preallocating this Jacobian), or to provide a specific matrix factorization.
+`∂r∂y = drdy(residual, y, x, p)` (where `r = residual(y, x, p)`).  The default implementation computes these partials with ForwardDiff. Additionally the user can override the linear solve:
+`x = lsolve(A, b)`.  The default is the backslash operator.  
 
-Additionally the user can override the linear solve:
-`x = lsolve(A, b)`.  The default is the backslash operator.  One example where a user may wish to override is to use matrix-free Krylov methods for large systems (in connection with the computation for ∂r/∂y).
+Some examples where one may wish to override these behaviors are for cases with significant sparsity (e.g., using SparseDiffTools), to preallocate the Jacobian, to provide a specific matrix factorization, or if the number of states is large overriding both methods will often be beneficial so that you can use iterative linear solvers (matrix-free Krylov methods) and thus provide efficient Jacobian vector products rather than a Jacobian.
 
 The other partials, ∂r/∂x, are not computed directly, but rather are used in efficient Jacobian vector (or vector Jacobian) products.
 

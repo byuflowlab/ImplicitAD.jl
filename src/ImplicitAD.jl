@@ -194,7 +194,7 @@ apply_factorization(A) = apply_factorization(A, factorize)
 
 
 """
-    implicit_linear(A, b; lsolve=linear_solve, fact=factorize)
+    implicit_linear(A, b; lsolve=linear_solve, Af=factorize)
 
 Make implicit function AD compatible (specifically with ForwardDiff and ReverseDiff).
 This version is for linear equations Ay = b

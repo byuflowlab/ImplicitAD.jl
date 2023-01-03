@@ -104,6 +104,50 @@ end
 
 end
 
+@testset "iterative" begin
+            
+    function residual!(r, y, x, p)
+        r[1] = (y[1] + x[1])*(y[2]^3-x[2])+x[3]
+        r[2] = sin(y[2]*exp(y[1])-1)*x[4]
+        return r
+    end
+
+    z = zeros(2)
+
+    function solve(x, p)
+        rwrap(r, y) = residual!(r, y, x[1:4], p)
+        res = nlsolve(rwrap, [0.1; 1.2], autodiff=:forward)
+        z .= res.zero
+        return z
+    end
+
+    A = zeros(2, 2)
+
+    function drdy(residual, y, x, p)
+        A[1, 1] = y[2]^3-x[2]
+        A[1, 2] = 3*y[2]^2*(y[1]+x[1])
+        u = exp(y[1])*cos(y[2]*exp(y[1])-1)*x[4]
+        A[2, 1] = y[2]*u
+        A[2, 2] = u
+        return A
+    end
+
+    function modprogram(x)
+        z = 2.0*x
+        w = z + x.^2
+        y = implicit(solve, residual!, w, (), drdy=drdy)
+        y = implicit(solve, residual!, [y[1], y[2], w[3], w[4]], (), drdy=drdy)
+        return y[1] .+ w*y[2]
+    end
+
+    x = [1.0; 2.0; 3.0; 4.0; 5.0]
+
+    J1 = ForwardDiff.jacobian(modprogram, x)
+    J2 = ReverseDiff.jacobian(modprogram, x)
+
+    @test all(isapprox.(J1, J2, atol=1e-14))
+            
+end
 
 # @testset "linear" begin
     

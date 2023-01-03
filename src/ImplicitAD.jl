@@ -135,7 +135,7 @@ function implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, 
     # solve for Jacobian-vector product
     b = jvp(residual, yv, x, p)
 
-    # comptue partial derivatives
+    # compute partial derivatives
     A = drdy(residual, yv, xv, p)
     
     # linear solve
@@ -149,13 +149,11 @@ end
 # Provide a ChainRule rule for reverse mode
 function ChainRulesCore.rrule(::typeof(implicit), solve, residual, x, p, drdy, lsolve)
 
-    # evaluate solver
-    y = solve(x, p)
-
-    # comptue partial derivatives
-    A = drdy(residual, y, x, p)
+    # evaluate solver (create local copy of the output to guard against `y` getting overwritten)
+    y = copy(solve(x, p))
 
     function pullback(ybar)
+        A = drdy(residual, y, x, p)
         u = lsolve(A', ybar)
         xbar = vjp(residual, y, x, p, -u)
         return NoTangent(), NoTangent(), NoTangent(), xbar, NoTangent(), NoTangent(), NoTangent()

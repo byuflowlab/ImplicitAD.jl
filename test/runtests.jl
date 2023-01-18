@@ -7,6 +7,8 @@ using FiniteDiff
 using LinearAlgebra: Symmetric, factorize, diagm
 using SparseArrays: sparse
 using FLOWMath: brent
+using UnPack
+import OrdinaryDiffEq: DAEProblem, DImplicitEuler
 
 @testset "residual" begin
 
@@ -71,7 +73,6 @@ using FLOWMath: brent
     @test all(isapprox.(J1, J4, atol=1e-14))
 
 end
-
 
 @testset "not in place" begin
 
@@ -322,6 +323,252 @@ end
     J1 = ForwardDiff.jacobian(test_orig, xv)
     J2 = ForwardDiff.jacobian(test, xv)
     @test all(isapprox.(J1, J2, rtol=1e-15))
+
+end
+
+@testset "explicit_unsteady (in-place)" begin
+
+    function lotkavolterra(y, x, t)
+        dy1 = x[1]*y[1] - x[2]*y[1]*y[2]
+        dy2 = -x[3]*y[2] + x[4]*y[1]*y[2]
+        return [dy1, dy2]
+    end
+
+    x0 = [1.5,1.0,3.0,1.0]; y0 = [1.0, 1.0]; tspan = (0.0, 10.0);
+    prob = ODEProblem(lotkavolterra, y0, tspan, x0)
+    alg = Tsit5()
+
+    # times at which to evaluate the solution
+    t = tspan[1]:0.1:tspan[2];
+
+    # method for solving the ODEProblem
+    function unsteady_solve(x, p=())
+        _prob = remake(prob, p=x)
+        sol = OrdinaryDiffEq.solve(_prob, alg, adaptive=false, tstops=t)
+        return hcat(vcat.(sol.u, sol.t)...)
+    end
+
+    # grab Tsit5 cache constants from DifferentialEquations
+    integrator = OrdinaryDiffEq.init(prob, alg, adaptive=false, tstops=t)
+    cache = integrator.cache
+
+    # perform_step function
+    function perform_step!(y, yprev, t, tprev, x, p)
+        if t == tprev
+            # initial conditions are prescribed
+            y .= y0
+        else
+            # adopted from perform_step! for the Tsit5 algorithm
+            @unpack c1,c2,c3,c4,c5,c6,a21,a31,a32,a41,a42,a43,a51,a52,a53,a54,a61,a62,a63,a64,a65,a71,a72,a73,a74,a75,a76,btilde1,btilde2,btilde3,btilde4,btilde5,btilde6,btilde7 = cache
+            dt = t - tprev
+            k1 = lotkavolterra(yprev, x, t)
+            k2 = lotkavolterra(yprev+dt*a21*k1, x, t+c1*dt)
+            k3 = lotkavolterra(yprev+dt*(a31*k1+a32*k2), x, t+c2*dt)
+            k4 = lotkavolterra(yprev+dt*(a41*k1+a42*k2+a43*k3), x, t+c3*dt)
+            k5 = lotkavolterra(yprev+dt*(a51*k1+a52*k2+a53*k3+a54*k4), x, t+c4*dt)
+            k6 = lotkavolterra(yprev+dt*(a61*k1+a62*k2+a63*k3+a64*k4+a65*k5), x, t+dt)
+            y .= yprev+dt*(a71*k1+a72*k2+a73*k3+a74*k4+a75*k5+a76*k6)
+        end
+    end
+
+    # objective/loss function
+    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+
+    # modified objective/loss function
+    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step!, x, ())[1:end-1,:]))
+
+    # compute forward-mode sensitivities using ForwardDiff
+    g1 = ForwardDiff.gradient(program, x0)
+
+    # compute forward-mode sensitivities using ImplicitAD
+    g2 = ForwardDiff.gradient(modprogram, x0)
+
+    # compute reverse-mode sensitivities using ImplicitAD
+    g3 = ReverseDiff.gradient(modprogram, x0)
+
+    # test forward-mode ImplicitAD
+    @test all(isapprox.(g1, g2, atol=1e-14))
+
+    # test reverse-mode ImplicitAD
+    @test all(isapprox.(g1, g3, atol=1e-14))
+
+end
+
+@testset "explicit_unsteady (out-of-place)" begin
+
+    function lotkavolterra(y, x, t)
+        dy1 = x[1]*y[1] - x[2]*y[1]*y[2]
+        dy2 = -x[3]*y[2] + x[4]*y[1]*y[2]
+        return [dy1, dy2]
+    end
+
+    x0 = [1.5,1.0,3.0,1.0]; y0 = [1.0, 1.0]; tspan = (0.0, 10.0);
+    prob = ODEProblem(lotkavolterra, y0, tspan, x0)
+    alg = Tsit5()
+
+    # times at which to evaluate the solution
+    t = tspan[1]:0.1:tspan[2];
+
+    # method for solving the ODEProblem
+    function unsteady_solve(x, p=())
+        _prob = remake(prob, p=x)
+        sol = OrdinaryDiffEq.solve(_prob, alg, adaptive=false, tstops=t)
+        return hcat(vcat.(sol.u, sol.t)...)
+    end
+
+    # grab Tsit5 cache constants from DifferentialEquations
+    integrator = OrdinaryDiffEq.init(prob, alg, adaptive=false, tstops=t)
+    cache = integrator.cache
+
+    # perform_step function
+    function perform_step(yprev, t, tprev, x, p)
+        if t == tprev
+            # initial conditions are prescribed
+            y = promote_type(typeof(t), typeof(tprev), eltype(x)).(y0)
+        else
+            # adopted from perform_step! for the Tsit5 algorithm
+            @unpack c1,c2,c3,c4,c5,c6,a21,a31,a32,a41,a42,a43,a51,a52,a53,a54,a61,a62,a63,a64,a65,a71,a72,a73,a74,a75,a76,btilde1,btilde2,btilde3,btilde4,btilde5,btilde6,btilde7 = cache
+            dt = t - tprev
+            k1 = lotkavolterra(yprev, x, t)
+            k2 = lotkavolterra(yprev+dt*a21*k1, x, t+c1*dt)
+            k3 = lotkavolterra(yprev+dt*(a31*k1+a32*k2), x, t+c2*dt)
+            k4 = lotkavolterra(yprev+dt*(a41*k1+a42*k2+a43*k3), x, t+c3*dt)
+            k5 = lotkavolterra(yprev+dt*(a51*k1+a52*k2+a53*k3+a54*k4), x, t+c4*dt)
+            k6 = lotkavolterra(yprev+dt*(a61*k1+a62*k2+a63*k3+a64*k4+a65*k5), x, t+dt)
+            y = yprev+dt*(a71*k1+a72*k2+a73*k3+a74*k4+a75*k5+a76*k6)
+        end
+        return y
+    end
+
+    # objective/loss function
+    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+
+    # modified objective/loss function
+    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step, x, ())[1:end-1,:]))
+
+    # compute forward-mode sensitivities using ForwardDiff
+    g1 = ForwardDiff.gradient(program, x0)
+
+    # compute forward-mode sensitivities using ImplicitAD
+    g2 = ForwardDiff.gradient(modprogram, x0)
+
+    # compute reverse-mode sensitivities using ImplicitAD
+    g3 = ReverseDiff.gradient(modprogram, x0)
+
+    # test forward-mode ImplicitAD
+    @test all(isapprox.(g1, g2, atol=1e-14))
+
+    # test reverse-mode ImplicitAD
+    @test all(isapprox.(g1, g3, atol=1e-14))
+
+end
+
+@testset "implicit_unsteady (in-place)" begin
+
+    function robertson!(out,dy,y,x,t)
+        out[1] = - x[1]*y[1]               + x[2]*y[2]*y[3] - dy[1]
+        out[2] = + x[1]*y[1] - x[3]*y[2]^2 - x[2]*y[2]*y[3] - dy[2]
+        out[3] = y[1] + y[2] + y[3] - x[4]
+    end
+
+    x0 = [0.04,1e4,3e7,1.0]; tspan=(1e-6,1e5); y0 = [1.0,0.0,0.0]; dy0 = [-0.04,0.04,0.0];
+    prob = DAEProblem(robertson!, dy0, y0, tspan, x0, differential_vars = [true,true,false])
+    alg = DImplicitEuler()
+
+    # times at which to evaluate the solution
+    t = range(tspan[1], tspan[2], length=100)
+
+    # method for solving the DAEProblem
+    function unsteady_solve(x, p=())
+        _prob = remake(prob, p=x)
+        sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=NoInit())
+        return hcat(vcat.(sol.u, sol.t)...)
+    end
+
+    # residual function
+    function residual!(r, y, yprev, t, tprev, x, p)
+        if t == tspan[1]
+            r .= 0
+        else
+            robertson!(r, (y - yprev)/(t - tprev), y, x, t)
+        end
+    end
+
+    # objective/loss function
+    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+
+    # modified objective/loss function
+    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual, x, ())[1:end-1,:]))
+
+    # compute forward-mode sensitivities using ForwardDiff
+    g1 = ForwardDiff.gradient(program, x0)
+
+    # compute forward-mode sensitivities using ImplicitAD
+    g2 = ForwardDiff.gradient(modprogram, x0)
+
+    # compute reverse-mode sensitivities using ImplicitAD
+    g3 = ReverseDiff.gradient(modprogram, x0)
+
+    # test forward-mode ImplicitAD
+    @test all(isapprox.(g1, g2, atol=1e-14))
+
+    # test reverse-mode ImplicitAD
+    @test all(isapprox.(g1, g3, atol=1e-14))
+
+end
+
+@testset "implicit_unsteady (out-of-place)" begin
+
+    function robertson(dy,y,x,t)
+        out1 = - x[1]*y[1]               + x[2]*y[2]*y[3] - dy[1]
+        out2 = + x[1]*y[1] - x[3]*y[2]^2 - x[2]*y[2]*y[3] - dy[2]
+        out3 = y[1] + y[2] + y[3] - x[4]
+        return [out1, out2, out3]
+    end
+
+    x0 = [0.04,1e4,3e7,1.0]; tspan=(1e-6,1e5); y0 = [1.0,0.0,0.0]; dy0 = [-0.04,0.04,0.0];
+    prob = DAEProblem(robertson, dy0, y0, tspan, x0, differential_vars = [true,true,false])
+    alg = DImplicitEuler()
+
+    # times at which to evaluate the solution
+    t = range(tspan[1], tspan[2], length=100)
+
+    # method for solving the DAEProblem
+    function unsteady_solve(x, p=())
+        _prob = remake(prob, p=x)
+        sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=NoInit())
+        return hcat(vcat.(sol.u, sol.t)...)
+    end
+
+    # residual function
+    function residual(y, yprev, t, tprev, x, p)
+        if t == tspan[1]
+            return promote_type(typeof(t), eltype(y), eltype(x)).(y - y0)
+        else
+            return robertson((y - yprev)/(t - tprev), y, x, t)
+        end
+    end
+
+    # objective/loss function
+    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+
+    # modified objective/loss function
+    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual, x, ())[1:end-1,:]))
+
+    # compute forward-mode sensitivities using ForwardDiff
+    g1 = ForwardDiff.gradient(program, x0)
+
+    # compute forward-mode sensitivities using ImplicitAD
+    g2 = ForwardDiff.gradient(modprogram, x0)
+
+    # compute reverse-mode sensitivities using ImplicitAD
+    g3 = ReverseDiff.gradient(modprogram, x0)
+
+    # test forward-mode ImplicitAD
+    @test all(isapprox.(g1, g2, atol=1e-14))
+
+    # test reverse-mode ImplicitAD
+    @test all(isapprox.(g1, g3, atol=1e-14))
 
 end
 

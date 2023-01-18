@@ -6,7 +6,7 @@ using ChainRulesCore
 using LinearAlgebra: factorize, ldiv!
 
 # main function
-export implicit, implicit_linear, apply_factorization, provide_rule
+export implicit, explicit_unsteady, implicit_unsteady, implicit_linear, apply_factorization, provide_rule
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ fd_partials(x) = reduce(vcat, transpose.(ForwardDiff.partials.(x)))
 """
 unpack ForwardDiff Dual return value and derivative.
 """
-function unpack_dual(x) 
+function unpack_dual(x)
     xv = fd_value(x)
     dx = fd_partials(x)
     return xv, dx
@@ -40,22 +40,53 @@ Compute Jacobian vector product b = -B*xdot where B_ij = ∂r_i/∂x_j
 This takes in the dual directly for x = (xv, xdot) since it is already formed that way.
 """
 function jvp(residual, y, xd, p)
-    
+
     # evaluate residual function
     rd = residual(y, xd, p)  # constant y
-    
+
     # extract partials
-    b = -fd_partials(rd) 
+    b = -fd_partials(rd)
 
     return b
 
 end
+
+# explicit unsteady
+function jvp(perform_step, yprevd, t, tprev, xd, p)
+
+    # evaluate residual function
+    yd = perform_step(yprevd, t, tprev, xd, p)  # constant y
+
+    # extract partials
+    return fd_partials(yd)
+end
+
+# implicit unsteady
+function jvp(residual, y, yprevd, t, tprev, xd, p)
+
+    # evaluate residual function
+    rd = residual(y, yprevd, t, tprev, xd, p)  # constant y
+
+    # extract partials
+    return fd_partials(rd)
+end
+
 
 """
 Compute vector Jacobian product c = B^T v = (v^T B)^T where B_ij = ∂r_i/∂x_j and return c
 """
 function vjp(residual, y, x, p, v)
     return ReverseDiff.gradient(xtilde -> v' * residual(y, xtilde, p), x)  # instead of using underlying functions in ReverseDiff just differentiate -v^T * r with respect to x to get -v^T * dr/dx
+end
+
+# explicit unsteady
+function vjp(perform_step, yprev, t, tprev, x, p, v)
+    return ReverseDiff.gradient((yprevtilde, xtilde) -> v' * perform_step(yprevtilde, t, tprev, xtilde, p), (yprev, x))
+end
+
+# implicit unsteady
+function vjp(residual, y, yprev, t, tprev, x, p, v)
+    return ReverseDiff.gradient((yprevtilde, xtilde) -> v' * residual(y, yprevtilde, t, tprev, xtilde, p), (yprev, x))
 end
 
 
@@ -69,6 +100,17 @@ end
 
 function drdy_forward(residual, y::Number, x, p)  # 1D case
     A = ForwardDiff.derivative(ytilde -> residual(ytilde, x, p), y)
+    return A
+end
+
+# implicit unsteady
+function drdy_forward(residual, y::AbstractVector, yprev, t, tprev, x, p)
+    A = ForwardDiff.jacobian(ytilde -> residual(ytilde, yprev, t, tprev, x, p), y)
+    return A
+end
+
+function drdy_forward(residual, y::Number, yprev, t, tprev, x, p)  # 1D case
+    A = ForwardDiff.derivative(ytilde -> residual(ytilde, yprev, t, tprev, x, p), y)
     return A
 end
 
@@ -104,7 +146,7 @@ function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_sol
     # ---- check for in-place version and wrap as needed -------
     new_residual = residual
     if applicable(residual, 1.0, 1.0, 1.0, 1.0)  # in-place
-        
+
         function residual_wrap(yw, xw, pw)  # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
             T = promote_type(eltype(xw), eltype(yw))
             rw = zeros(T, length(yw))  # match type of input variables
@@ -113,7 +155,7 @@ function implicit(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_sol
         end
         new_residual = residual_wrap
     end
-    
+
     return implicit(solve, new_residual, x, p, drdy, lsolve)
 end
 
@@ -124,20 +166,20 @@ implicit(solve, residual, x, p, drdy, lsolve) = solve(x, p)
 
 
 
-# Overloaded for ForwardDiff inputs, providing exact derivatives using 
+# Overloaded for ForwardDiff inputs, providing exact derivatives using
 # Jacobian vector product.
 function implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, drdy, lsolve) where {T}
-    
+
     # evaluate solver
     xv = fd_value(x)
     yv = solve(xv, p)
-    
+
     # solve for Jacobian-vector product
     b = jvp(residual, yv, x, p)
 
     # compute partial derivatives
     A = drdy(residual, yv, xv, p)
-    
+
     # linear solve
     ydot = lsolve(A, b)
 
@@ -167,7 +209,298 @@ end
 ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::TrackedArray, p, drdy, lsolve)
 ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::AbstractVector{<:TrackedReal}, p, drdy, lsolve)
 
+# ------ Overloads for explicit_unsteady ----------
 
+"""
+    explicit_unsteady(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_solve)
+
+Make an explicit time-marching analysis AD compatible (specifically with ForwardDiff and
+ReverseDiff).
+
+# Arguments:
+ - `solve::function`: function `y = solve(x, p)`.  Perform a time marching analysis,
+    and return the matrix `[y[1] y[2] y[3] ... y[N]; t[1], t[2], t[3] ... t[N]]` where `y[i]`
+    is the state vector at time step `i` and `t[i]` is the corresponding time, for input
+    variables `x`, initial conditions `y0`, and fixed variables `p`.
+ - `perform_step::function`: Either `y[i] = perform_step(y[i-1], t[i], t[i-1], x, p)` or
+    in-place `perform_step!(y[i], y[i-1], t[i], t[i-1], x, p)`. Set the next set of state
+    variables `y[i]` (scalar or vector), given the previous state `y[i-1]` (scalar or vector),
+    current time `t[i]`, previous time `t[i-1]`, variables `x` (vector), and fixed parameters `p` (tuple).
+ - `x`: evaluation point
+ - `p`: fixed parameters, default is empty tuple.
+"""
+function explicit_unsteady(solve, perform_step, x, p=())
+
+    # ---- check for in-place version and wrap as needed -------
+    new_perform_step = perform_step
+    if applicable(perform_step, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # in-place
+
+        function explicit_perform_step_wrap(yprevw, tw, tprevw, xw, pw)  # wrap perform_step function in a explicit form for convenience and ensure type of r is appropriate
+            T = promote_type(eltype(yprevw), typeof(tw), typeof(tprevw), eltype(xw))
+            yw = zeros(T, length(yprevw))  # match type of input variables
+            perform_step(yw, yprevw, tw, tprevw, xw, pw)
+            return yw
+        end
+        new_perform_step = explicit_perform_step_wrap
+    end
+
+    return _explicit_unsteady(solve, new_perform_step, x, p)
+end
+
+# If no AD, just solve normally.
+_explicit_unsteady(solve, perform_step, x, p) = solve(x, p)
+
+# Overloaded for ForwardDiff inputs, providing exact derivatives using Jacobian vector product.
+function _explicit_unsteady(solve, perform_step, x::AbstractVector{<:ForwardDiff.Dual{T}}, p) where {T}
+
+    # evaluate solver
+    xv = fd_value(x)
+    ytv = solve(xv, p)
+
+    # get solution dimensions
+    ny = size(ytv, 1) - 1
+    nt = size(ytv, 2)
+
+    # initialize output
+    yt = similar(ytv, ForwardDiff.Dual{T}, ny+1, nt)
+
+    # --- Initial Time Step --- #
+
+    # solve for Jacobian-vector products
+    @views ydot = jvp(perform_step, ytv[1:ny,1], ytv[ny+1,1], ytv[ny+1,1], x, p)
+
+    # # repack in ForwardDiff Dual
+    @views yt[1:ny,1] = pack_dual(ytv[1:ny,1], ydot, T)
+    yt[ny+1,1] = ytv[ny+1,1]
+
+    # --- Additional Time Steps --- #
+
+    for i = 2:nt
+
+        # solve for Jacobian-vector product
+        @views ydot = jvp(perform_step, yt[1:ny,i-1], ytv[ny+1,i], ytv[ny+1,i-1], x, p)
+
+        # repack in ForwardDiff Dual
+        @views yt[1:ny,i] = pack_dual(ytv[1:ny,i], ydot, T)
+        yt[ny+1,i] = ytv[ny+1,i]
+
+    end
+
+    return yt
+end
+
+# Provide a ChainRule rule for reverse mode
+function ChainRulesCore.rrule(::typeof(_explicit_unsteady), solve, perform_step, x, p)
+
+    # evaluate solver
+    yt = solve(x, p)
+
+    # get solution dimensions
+    ny = size(yt, 1) - 1
+    nt = size(yt, 2)
+
+    # create local copy of the output to guard against `yt` getting overwritten
+    yt = copy(yt)
+
+    function pullback(ytbar)
+
+        if nt > 1
+
+            # --- Final Time Step --- #
+            @views λ = ytbar[1:ny,nt]
+            @views Δybar, Δxbar = vjp(perform_step, yt[1:ny,nt-1], yt[ny+1,nt], yt[ny+1,nt-1], x, p, λ)
+            xbar = Δxbar
+            @views ytbar[1:ny,nt-1] += Δybar
+
+            # --- Additional Time Steps --- #
+            for i = nt-1:-1:2
+                @views λ = ytbar[1:ny,i]
+                @views Δybar, Δxbar = vjp(perform_step, yt[1:ny,i-1], yt[ny+1,i], yt[ny+1,i-1], x, p, λ)
+                xbar += Δxbar
+                @views ytbar[1:ny,i-1] += Δybar
+            end
+
+            # --- Initial Time Step --- #
+            @views λ = ytbar[1:ny,1]
+            @views Δybar, Δxbar = vjp(perform_step, yt[1:ny,1], yt[ny+1,1], yt[ny+1,1], xbar, p, λ)
+            xbar += Δxbar
+
+        else
+
+            # --- Initial Time Step --- #
+            @views λ = ytbar[1:ny,1]
+            @views Δybar, Δxbar = vjp(perform_step, yt[1:ny,1], yt[ny+1,1], yt[ny+1,1], xbar, p, λ)
+            xbar = Δxbar
+
+        end
+
+        return NoTangent(), NoTangent(), NoTangent(), xbar, NoTangent()
+    end
+
+    return yt, pullback
+end
+
+# register above rule for ReverseDiff
+ReverseDiff.@grad_from_chainrules _explicit_unsteady(solve, perform_step, x::TrackedArray, p)
+ReverseDiff.@grad_from_chainrules _explicit_unsteady(solve, perform_step, x::AbstractVector{<:TrackedReal}, p)
+
+
+# ------ Overloads for implicit_unsteady ----------
+
+"""
+    implicit_unsteady(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_solve)
+
+Make a implicit time-marching analysis AD compatible (specifically with ForwardDiff and
+ReverseDiff).
+
+# Arguments:
+ - `solve::function`: function `y = solve(x, p)`.  Perform a time marching analysis,
+    and return the matrix `[y[1] y[2] y[3] ... y[N]; t[1], t[2], t[3] ... t[N]]` where `y[i]`
+    is the state vector at time step `i` and `t[i]` is the corresponding time, for input
+    variables `x`, and fixed variables `p`.
+ - `residual::function`: Either `r[i] = residual(t[i], t[i-1], y[i], y[i-1], x, p)` or
+    in-place `residual!(r[i], t[i], t[i-1], y[i], y[i-1], x, p)`. Set current residual
+    `r[i]` (scalar or vector), given current state `y[i]` (scalar or vector),
+    previous state `y[i-1]` (scalar or vector), variables `x` (vector), and fixed
+    parameters `p` (tuple).
+ - `x`: evaluation point
+ - `p`: fixed parameters, default is empty tuple.
+ - `drdy`: drdy(residual, y, x, p). Provide (or compute yourself): ∂ri/∂yj.  Default is
+    forward mode AD.
+ - `lsolve::function`: `lsolve(A, b)`. Linear solve `A x = b` (where `A` is computed in
+    `drdy` and `b` is computed in `jvp`, or it solves `A^T x = c` where `c` is computed
+    in `vjp`). Default is backslash operator.
+"""
+function implicit_unsteady(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_solve)
+
+    # ---- check for in-place version and wrap as needed -------
+    new_residual = residual
+    if applicable(residual, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # in-place
+
+        function residual_wrap(tw, tprevw, yw, yprevw, xw, pw)  # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
+            T = promote_type(typeof(tw), typeof(tprevw), eltype(yw), eltype(yprevw), eltype(xw))
+            rw = zeros(T, length(yw))  # match type of input variables
+            residual(rw, tw, tprevw, yw, yprevw, xw, pw)
+            return rw
+        end
+        new_residual = residual_wrap
+    end
+
+    return implicit_unsteady(solve, new_residual, x, p, drdy, lsolve)
+end
+
+# If no AD, just solve normally.
+implicit_unsteady(solve, residual, x, p, drdy, lsolve) = solve(x, p)
+
+# Overloaded for ForwardDiff inputs, providing exact derivatives using Jacobian vector product.
+function implicit_unsteady(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, drdy, lsolve) where {T}
+
+    # evaluate solver
+    xv = fd_value(x)
+    ytv = solve(xv, p)
+
+    # get solution dimensions
+    ny = size(ytv, 1) - 1
+    nt = size(ytv, 2)
+
+    # initialize output
+    yt = similar(ytv, ForwardDiff.Dual{T}, ny+1, nt)
+
+    # --- Initial Time Step --- #
+
+    # solve for Jacobian-vector products
+    @views b = jvp(residual, ytv[1:ny,1], ytv[1:ny,1], ytv[ny+1,1], ytv[ny+1,1], x, p)
+
+    # compute partial derivatives
+    @views A = drdy(residual, ytv[1:ny,1], ytv[1:ny,1], ytv[ny+1,1], ytv[ny+1,1], xv, p)
+
+    # linear solve
+    ydot = lsolve(A, b)
+
+    # # repack in ForwardDiff Dual
+    @views yt[1:ny,1] = pack_dual(ytv[1:ny,1], ydot, T)
+    yt[ny+1,1] = ytv[ny+1,1]
+
+    # --- Additional Time Steps --- #
+
+    for i = 2:nt
+
+        # solve for Jacobian-vector product
+        @views b = jvp(residual, ytv[1:ny,i], yt[1:ny,i-1], ytv[ny+1,i], ytv[ny+1,i-1], x, p)
+
+        # compute partial derivatives
+        @views A = drdy(residual, ytv[1:ny,i], ytv[1:ny,i-1], ytv[ny+1,i], ytv[ny+1,i-1], xv, p)
+
+        # linear solve
+        ydot = lsolve(A, b)
+
+        # repack in ForwardDiff Dual
+        @views yt[1:ny,i] = pack_dual(ytv[1:ny,i], ydot, T)
+        yt[ny+1,i] = ytv[ny+1,i]
+
+    end
+
+    return yt
+end
+
+# Provide a ChainRule rule for reverse mode
+function ChainRulesCore.rrule(::typeof(implicit_unsteady), solve, residual, x, p, drdy, lsolve)
+
+    # evaluate solver
+    yt = solve(x, p)
+
+    # get solution dimensions
+    ny = size(yt, 1) - 1
+    nt = size(yt, 2)
+
+    # create local copy of the output to guard against `yt` getting overwritten
+    yt = copy(yt)
+
+    function pullback(ytbar)
+
+        if nt > 1
+
+            # --- Final Time Step --- #
+            @views A = drdy(residual, yt[1:ny,nt], yt[1:ny,nt-1], yt[ny+1,nt], yt[ny+1,nt-1], x, p)
+            @views λ = lsolve(A', ytbar[1:ny,nt])
+            @views Δybar, Δxbar = vjp(residual, yt[1:ny,nt], yt[1:ny,nt-1], yt[ny+1,nt], yt[ny+1,nt-1], x, p, -λ)
+            xbar = Δxbar
+            @views ytbar[1:ny,nt-1] += Δybar
+
+            # --- Additional Time Steps --- #
+            for i = nt-1:-1:2
+                @views A = drdy(residual, yt[1:ny,i], yt[1:ny,i-1], yt[ny+1,i], yt[ny+1,i-1], x, p)
+                @views λ = lsolve(A', ytbar[1:ny,i])
+                @views Δybar, Δxbar = vjp(residual, yt[1:ny,i], yt[1:ny,i-1], yt[ny+1,i], yt[ny+1,i-1], x, p, -λ)
+                xbar += Δxbar
+                @views ytbar[1:ny,i-1] += Δybar
+            end
+
+            # --- Initial Time Step --- #
+            @views A = drdy(residual, yt[1:ny,1], yt[1:ny,1], yt[ny+1,1], yt[ny+1,1], x, p)
+            @views λ = lsolve(A', ytbar[1:ny,1])
+            @views Δybar, Δxbar = vjp(residual, yt[1:ny,1], yt[1:ny,1], yt[ny+1,1], yt[ny+1,1], xbar, p, -λ)
+            xbar += Δxbar
+
+        else
+
+            # --- Initial Time Step --- #
+            @views A = drdy(residual, yt[1:ny,1], yt[1:ny,1], yt[ny+1,1], yt[ny+1,1], x, p)
+            @views λ = lsolve(A', ytbar[1:ny,1])
+            @views Δybar, Δxbar = vjp(residual, yt[1:ny,1], yt[1:ny,1], yt[ny+1,1], yt[ny+1,1], xbar, p, -λ)
+            xbar += Δxbar
+
+        end
+
+        return NoTangent(), NoTangent(), NoTangent(), xbar, NoTangent(), NoTangent(), NoTangent()
+    end
+
+    return yt, pullback
+end
+
+# register above rule for ReverseDiff
+ReverseDiff.@grad_from_chainrules implicit_unsteady(solve, residual, x::TrackedArray, p, drdy, lsolve)
+ReverseDiff.@grad_from_chainrules implicit_unsteady(solve, residual, x::AbstractVector{<:TrackedReal}, p, drdy, lsolve)
 
 # ------ linear case ------------
 
@@ -175,7 +508,7 @@ ReverseDiff.@grad_from_chainrules implicit(solve, residual, x::AbstractVector{<:
     apply_factorization(A, factfun)
 
 Apply a matrix factorization to the primal portion of a dual number.
-Avoids user from needing to add ForwardDiff as a dependency.  
+Avoids user from needing to add ForwardDiff as a dependency.
 `Afactorization = factfun(A)`
 """
 function apply_factorization(A::AbstractArray{<:ForwardDiff.Dual{T}}, factfun) where {T}
@@ -215,19 +548,19 @@ implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, Af) where {T
 
 # Both A and b contain duals
 function linear_dual(A, b, lsolve, Af, T)
-    
+
     # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
     bv = fd_value(b)
 
     # save factorization since we will perform two linear solves
     Afact = isnothing(Af) ? factorize(fd_value(A)) : Af
-    
+
     # evaluate linear solver
     yv = lsolve(Afact, bv)
-    
+
     # extract Partials of b - A * y  i.e., bdot - Adot * y  (since y does not contain duals)
     rhs = fd_partials(b - A*yv)
-    
+
     # solve for new derivatives
     ydot = lsolve(Afact, rhs)
 
@@ -244,7 +577,7 @@ function ChainRulesCore.rrule(::typeof(implicit_linear), A, b, lsolve, Af)
 
     # evaluate solver
     y = lsolve(Afact, b)
-    
+
     function implicit_pullback(ybar)
         u = lsolve(Afact', ybar)
         return NoTangent(), -u*y', u, NoTangent(), NoTangent()
@@ -265,21 +598,21 @@ ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, Abstrac
 # end
 
 # function implicit_linear_inplace(A, b, y::AbstractVector{<:ForwardDiff.Dual{T}}, Af) where {T}
-    
+
 #     # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
 #     bv = fd_value(b)
 #     yv, ydot = unpack_dual(y)
 
 #     # save factorization since we will perform two linear solves
 #     Afact = isnothing(Af) ? factorize(fd_value(A)) : Af
-    
+
 #     # evaluate linear solver
 #     ldiv!(yv, Afact, bv)
-    
+
 #     # extract Partials of b - A * y  i.e., bdot - Adot * y  (since y does not contain duals)
 #     rhs = fd_partials(b - A*yv)
-    
-#     # solve for new derivatives    
+
+#     # solve for new derivatives
 #     ldiv!(ydot, Afact, rhs)
 
 #     # reassign y to this value
@@ -292,12 +625,12 @@ ReverseDiff.@grad_from_chainrules implicit_linear(A::Union{TrackedArray, Abstrac
 """
     provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothing)
 
-Provide partials rather than rely on AD.  For cases where AD is not available 
+Provide partials rather than rely on AD.  For cases where AD is not available
 or to provide your own rule, or to use mixed mode, etc.
 
 # Arguments
 - `func::function`, `x::vector{float}`, `p::tuple`:  function of form: y = func(x, p), where x are variables and p are fixed parameters.
-- `mode::string`: 
+- `mode::string`:
     - "ffd": forward finite difference
     - "cfd": central finite difference
     - "cs": complex step
@@ -312,7 +645,7 @@ provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothi
 provide_rule(func, x, p, mode, jacobian, jvp, vjp) = func(x, p)
 
 function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, jacobian, jvp, vjp) where {T}
-    
+
     # unpack dual
     xv, xdot = unpack_dual(x)
     nx, nd = size(xdot)
@@ -323,20 +656,20 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
 
     # initialize
     ydot = Matrix{Float64}(undef, ny, nd)
-    
+
     if mode == "ffd"  # forward finite diff
 
         h = sqrt(eps(Float64))  # theoretical optimal (absolute) step size
-    
+
         # check whether we should do a series of JVPs or compute Jacobian than multiply
-        
+
         if nd <= nx  # do JVPs (for each dual)
             xnew = Vector{Float64}(undef, nx)
             for i = 1:nd
                 xnew .= xv + h*xdot[:, i]  # directional derivative
                 ydot[:, i] = (func(xnew, p) - yv)/h
             end
-        
+
         else  # compute Jacobian first
             J = Matrix{Float64}(undef, ny, nx)
             for i = 1:nx
@@ -347,13 +680,13 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
             end
             ydot .= J * xdot
         end
-    
+
     elseif mode == "cfd"  # central finite diff
 
         h = cbrt(eps(Float64))  # theoretical optimal (absolute) step size
-    
+
         # check whether we should do a series of JVPs or compute Jacobian than multiply
-        
+
         if nd <= nx  # do JVPs
             xnew = Vector{Float64}(undef, nx)
             for i = 1:nd
@@ -363,7 +696,7 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
                 ym = func(xnew, p)
                 ydot[:, i] = (yp - ym)/(2*h)
             end
-        
+
         else  # compute Jacobian first
             J = Matrix{Float64}(undef, ny, nx)
             for i = 1:nx
@@ -379,18 +712,18 @@ function provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, j
         end
 
     elseif mode == "cs"  # complex step
-        
+
         h = 1e-30
         xnew = Vector{ComplexF64}(undef, nx)
-    
+
         # check whether we should do a series of JVPs or compute Jacobian than multiply
-        
+
         if nd <= nx  # do JVPs (for each dual)
             for i = 1:nd
                 xnew .= xv + h*im*xdot[:, i]  # directional derivative
                 ydot[:, i] = imag(func(xnew, p))/h
             end
-        
+
         else  # compute Jacobian first
             J = Matrix{Float64}(undef, ny, nx)
             xnew .= xv
@@ -425,7 +758,7 @@ function ChainRulesCore.rrule(::typeof(provide_rule), func, x, p, mode, jacobian
     y = func(x, p)
     nx = length(x)
     ny = length(y)
-    
+
     if mode == "vp"
 
         function vppullback(ybar)
@@ -434,7 +767,7 @@ function ChainRulesCore.rrule(::typeof(provide_rule), func, x, p, mode, jacobian
         end
         return y, vppullback
     end
-        
+
     J = Matrix{Float64}(undef, ny, nx)
 
     if mode == "ffd"
@@ -472,7 +805,7 @@ function ChainRulesCore.rrule(::typeof(provide_rule), func, x, p, mode, jacobian
         end
 
     elseif mode == "jacobian"
-        
+
         J .= jacobian(x, p)
 
     else

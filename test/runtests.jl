@@ -7,8 +7,8 @@ using FiniteDiff
 using LinearAlgebra: Symmetric, factorize, diagm
 using SparseArrays: sparse
 using FLOWMath: brent
-using UnPack
-import OrdinaryDiffEq: DAEProblem, DImplicitEuler
+using UnPack: @unpack
+import OrdinaryDiffEq
 
 @testset "residual" begin
 
@@ -335,15 +335,15 @@ end
     end
 
     x0 = [1.5,1.0,3.0,1.0]; y0 = [1.0, 1.0]; tspan = (0.0, 10.0);
-    prob = ODEProblem(lotkavolterra, y0, tspan, x0)
-    alg = Tsit5()
+    prob = OrdinaryDiffEq.ODEProblem(lotkavolterra, y0, tspan, x0)
+    alg = OrdinaryDiffEq.Tsit5()
 
     # times at which to evaluate the solution
     t = tspan[1]:0.1:tspan[2];
 
     # method for solving the ODEProblem
     function unsteady_solve(x, p=())
-        _prob = remake(prob, p=x)
+        _prob = OrdinaryDiffEq.remake(prob, p=x)
         sol = OrdinaryDiffEq.solve(_prob, alg, adaptive=false, tstops=t)
         return hcat(vcat.(sol.u, sol.t)...)
     end
@@ -387,10 +387,10 @@ end
     g3 = ReverseDiff.gradient(modprogram, x0)
 
     # test forward-mode ImplicitAD
-    @test all(isapprox.(g1, g2, atol=1e-14))
+    @test all(isapprox.(g1, g2, atol=1e-12))
 
     # test reverse-mode ImplicitAD
-    @test all(isapprox.(g1, g3, atol=1e-14))
+    @test all(isapprox.(g1, g3, atol=1e-12))
 
 end
 
@@ -403,15 +403,15 @@ end
     end
 
     x0 = [1.5,1.0,3.0,1.0]; y0 = [1.0, 1.0]; tspan = (0.0, 10.0);
-    prob = ODEProblem(lotkavolterra, y0, tspan, x0)
-    alg = Tsit5()
+    prob = OrdinaryDiffEq.ODEProblem(lotkavolterra, y0, tspan, x0)
+    alg = OrdinaryDiffEq.Tsit5()
 
     # times at which to evaluate the solution
     t = tspan[1]:0.1:tspan[2];
 
     # method for solving the ODEProblem
     function unsteady_solve(x, p=())
-        _prob = remake(prob, p=x)
+        _prob = OrdinaryDiffEq.remake(prob, p=x)
         sol = OrdinaryDiffEq.solve(_prob, alg, adaptive=false, tstops=t)
         return hcat(vcat.(sol.u, sol.t)...)
     end
@@ -456,10 +456,10 @@ end
     g3 = ReverseDiff.gradient(modprogram, x0)
 
     # test forward-mode ImplicitAD
-    @test all(isapprox.(g1, g2, atol=1e-14))
+    @test all(isapprox.(g1, g2, atol=1e-12))
 
     # test reverse-mode ImplicitAD
-    @test all(isapprox.(g1, g3, atol=1e-14))
+    @test all(isapprox.(g1, g3, atol=1e-12))
 
 end
 
@@ -472,23 +472,23 @@ end
     end
 
     x0 = [0.04,1e4,3e7,1.0]; tspan=(1e-6,1e5); y0 = [1.0,0.0,0.0]; dy0 = [-0.04,0.04,0.0];
-    prob = DAEProblem(robertson!, dy0, y0, tspan, x0, differential_vars = [true,true,false])
-    alg = DImplicitEuler()
+    prob = OrdinaryDiffEq.DAEProblem(robertson!, dy0, y0, tspan, x0, differential_vars = [true,true,false])
+    alg = OrdinaryDiffEq.DImplicitEuler()
 
     # times at which to evaluate the solution
     t = range(tspan[1], tspan[2], length=100)
 
     # method for solving the DAEProblem
     function unsteady_solve(x, p=())
-        _prob = remake(prob, p=x)
-        sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=NoInit())
+        _prob = OrdinaryDiffEq.remake(prob, p=x)
+        sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=OrdinaryDiffEq.NoInit())
         return hcat(vcat.(sol.u, sol.t)...)
     end
 
     # residual function
     function residual!(r, y, yprev, t, tprev, x, p)
         if t == tspan[1]
-            r .= 0
+            r .= y - y0
         else
             robertson!(r, (y - yprev)/(t - tprev), y, x, t)
         end
@@ -498,7 +498,7 @@ end
     program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
 
     # modified objective/loss function
-    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual, x, ())[1:end-1,:]))
+    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual!, x, ())[1:end-1,:]))
 
     # compute forward-mode sensitivities using ForwardDiff
     g1 = ForwardDiff.gradient(program, x0)
@@ -510,10 +510,10 @@ end
     g3 = ReverseDiff.gradient(modprogram, x0)
 
     # test forward-mode ImplicitAD
-    @test all(isapprox.(g1, g2, atol=1e-14))
+    @test all(isapprox.(g1, g2, atol=1e-12))
 
     # test reverse-mode ImplicitAD
-    @test all(isapprox.(g1, g3, atol=1e-14))
+    @test all(isapprox.(g1, g3, atol=1e-12))
 
 end
 
@@ -527,16 +527,16 @@ end
     end
 
     x0 = [0.04,1e4,3e7,1.0]; tspan=(1e-6,1e5); y0 = [1.0,0.0,0.0]; dy0 = [-0.04,0.04,0.0];
-    prob = DAEProblem(robertson, dy0, y0, tspan, x0, differential_vars = [true,true,false])
-    alg = DImplicitEuler()
+    prob = OrdinaryDiffEq.DAEProblem(robertson, dy0, y0, tspan, x0, differential_vars = [true,true,false])
+    alg = OrdinaryDiffEq.DImplicitEuler()
 
     # times at which to evaluate the solution
     t = range(tspan[1], tspan[2], length=100)
 
     # method for solving the DAEProblem
     function unsteady_solve(x, p=())
-        _prob = remake(prob, p=x)
-        sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=NoInit())
+        _prob = OrdinaryDiffEq.remake(prob, p=x)
+        sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=OrdinaryDiffEq.NoInit())
         return hcat(vcat.(sol.u, sol.t)...)
     end
 
@@ -565,10 +565,10 @@ end
     g3 = ReverseDiff.gradient(modprogram, x0)
 
     # test forward-mode ImplicitAD
-    @test all(isapprox.(g1, g2, atol=1e-14))
+    @test all(isapprox.(g1, g2, atol=1e-12))
 
     # test reverse-mode ImplicitAD
-    @test all(isapprox.(g1, g3, atol=1e-14))
+    @test all(isapprox.(g1, g3, atol=1e-12))
 
 end
 

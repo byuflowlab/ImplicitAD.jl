@@ -68,7 +68,9 @@ function jvp(residual, y, yprevd, t, tprev, xd, p)
     rd = residual(y, yprevd, t, tprev, xd, p)  # constant y
 
     # extract partials
-    return fd_partials(rd)
+    b = -fd_partials(rd)
+
+    return b
 end
 
 
@@ -377,13 +379,13 @@ function implicit_unsteady(solve, residual, x, p=(); drdy=drdy_forward, lsolve=l
     new_residual = residual
     if applicable(residual, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # in-place
 
-        function residual_wrap(tw, tprevw, yw, yprevw, xw, pw)  # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
+        function unsteady_residual_wrap(yw, yprevw, tw, tprevw, xw, pw)  # wrap residual function in a explicit form for convenience and ensure type of r is appropriate
             T = promote_type(typeof(tw), typeof(tprevw), eltype(yw), eltype(yprevw), eltype(xw))
             rw = zeros(T, length(yw))  # match type of input variables
-            residual(rw, tw, tprevw, yw, yprevw, xw, pw)
+            residual(rw, yw, yprevw, tw, tprevw, xw, pw)
             return rw
         end
-        new_residual = residual_wrap
+        new_residual = unsteady_residual_wrap
     end
 
     return implicit_unsteady(solve, new_residual, x, p, drdy, lsolve)

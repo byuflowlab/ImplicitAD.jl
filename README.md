@@ -14,6 +14,7 @@
 - Compatible with any solver (no differentiation occurs inside the solver)
 - Simple drop in functionality
 - Customizable subfunctions to accomodate different use cases
+- Version for ordinary differentiation equations (i.e., discrete adjoint)
 - Version for linear systems to provide symbolic partials automatically (again works with any linear solve whether or not it was already overloaded for AD)
 - Can provide custom rules to be inserted into the AD chain. Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).
 
@@ -47,3 +48,7 @@ That same functionality is useful also in cases where a function is already AD c
 pkg> activate .
 pkg> test
 ```
+
+**Other Packages**:
+
+[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) (a simplified version of the first package) are other prior implementations of the nonlinear case.  These two support ChainRules compatible packages and iterative linear solvers, whereas we have focused on ForwardDiff and ReverseDiff (though it will also work with ChainRules packages in reverse mode) and we support both direct and iterative solvers.  We've also added specialized rules for linear solvers, and ordinary differential equations in the form of a discrete adjoint (or discrete direct/forward mode).  [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/), which looks to support a wide range of AD packages and also allows custom linear solvers.

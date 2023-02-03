@@ -6,16 +6,17 @@
 
 **Summary**: Make implicit functions compatible with algorithmic differentiation without differenting inside the solvers. Also allow for custom rules with explicit functions (e.g., calling external code, mixed mode AD).
 
-**Author**: Andrew Ning
+**Author**: Andrew Ning and Taylor McDonnell
 
 **Features**:
 
 - Compatible with ForwardDiff and ReverseDiff
 - Compatible with any solver (no differentiation occurs inside the solver)
 - Simple drop in functionality
-- Customizable subfunctions to accomodate different use cases
+- Customizable subfunctions to accommodate different use cases
 - Version for ordinary differentiation equations (i.e., discrete adjoint)
-- Version for linear systems to provide symbolic partials automatically (again works with any linear solve whether or not it was already overloaded for AD)
+- Analytic overrides for linear systems (more efficient)
+- Analytic overrides for eigenvalue problems (more efficient)
 - Can provide custom rules to be inserted into the AD chain. Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).
 
 **Implicit Motivation**:

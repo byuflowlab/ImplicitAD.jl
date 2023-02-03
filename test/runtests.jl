@@ -4,7 +4,7 @@ using NLsolve
 using ForwardDiff
 using ReverseDiff
 using FiniteDiff
-using LinearAlgebra: Symmetric, factorize, diagm
+using LinearAlgebra: Symmetric, factorize, diagm, eigvals, eigvecs, I
 using SparseArrays: sparse
 using FLOWMath: brent
 using UnPack: @unpack
@@ -721,5 +721,85 @@ end
     J2 = ReverseDiff.jacobian(xt -> modprogram(xt, mode, jacobian, jvp, vjp), x)
     @test all(isapprox.(J1, J2, rtol=1e-15))
 
+
+end
+
+
+@testset "eigenvalues" begin
+
+    # -- B is identity, eigenvalues/vectors are complex ---
+    function eigsolve1(A, B)
+        λ = eigvals(A)
+        V = eigvecs(A)
+        U = eigvecs(A')
+        U = [U[:, 2] U[:, 1]]  # reorder to match left eigenvector order
+        
+        return λ, V, U
+    end
+
+    function test1(x)  
+        A = [x[1] x[2]; x[3] 2.0]
+        B = Matrix(1.0I, 2, 2)
+        λ = implicit_eigval(A, B, eigsolve1)
+        z = [real(λ[1]) + imag(λ[1]); real(λ[2]) + imag(λ[2])]
+        return z
+    end
+
+    x = [-4.0, -17.0, 2.0]
+    J1 = ForwardDiff.jacobian(test1, x)
+    Jfd = FiniteDiff.finite_difference_jacobian(test1, x, Val{:central})
+    J2 = ReverseDiff.jacobian(test1, x)
+
+    @test all(isapprox.(J1, J2, atol=1e-15))
+    @test all(isapprox.(J1, Jfd, atol=1e-10))
+
+
+    # --- B is identity, symmetric case (eigenvalues/vectors are all real) ---
+    function eigsolve2(A, B)
+        λ = eigvals(A)
+        V = eigvecs(A)
+        return λ, V, V
+    end
+
+    function test2(x)  
+        A = [x[1] x[2]; x[2] x[3]]
+        B = Matrix(1.0I, 2, 2)
+        λ = ImplicitAD.implicit_eigval(A, B, eigsolve2)
+        z = [real(λ[1]) + imag(λ[1]); real(λ[2]) + imag(λ[2])]
+        return z
+    end
+
+    x = [-4.0, -17.0, 2.0]
+    J1 = ForwardDiff.jacobian(test2, x)
+    Jfd = FiniteDiff.finite_difference_jacobian(test2, x, Val{:central})
+    J2 = ReverseDiff.jacobian(test2, x)
+
+    @test all(isapprox.(J1, J2, atol=1e-15))
+    @test all(isapprox.(J1, Jfd, atol=1e-9))
+
+    # --- A and B both random ------
+    function eigsolve3(A, B)
+        λ = eigvals(A, B)
+        V = eigvecs(A, B)
+        U = eigvecs(A', B')
+        
+        return λ, V, U
+    end
+
+    function test3(x)  
+        A = [x[1] x[2]; x[3] 2.0]
+        B = [x[4] x[5]; x[6] x[7]]
+        λ = ImplicitAD.implicit_eigval(A, B, eigsolve3)
+        z = [real(λ[1]) + imag(λ[1]); real(λ[2]) + imag(λ[2])]
+        return z
+    end
+
+    x = [-4.0, -17.0, 2.0, 2.5, 5.6, -4.0, 1.1]
+    J1 = ForwardDiff.jacobian(test3, x)
+    Jfd = FiniteDiff.finite_difference_jacobian(test3, x, Val{:central})
+    J2 = ReverseDiff.jacobian(test3, x)
+
+    @test all(isapprox.(J1, J2, atol=1e-15))
+    @test all(isapprox.(J1, Jfd, atol=1e-9))
 
 end

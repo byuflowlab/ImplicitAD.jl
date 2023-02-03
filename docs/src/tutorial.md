@@ -198,6 +198,49 @@ For `implicit_linear` there are two keywords for custom subfunctions:
 1) `lsolve(A, b)`: same purpose as before: solve ``A x = b`` where the default is the backslash operator.
 2) `fact(A)`: provide a matrix factorization of ``A``, since two linear solves are performed (for the primal and dual values).  default is `factorize` defined in `LinearAlgebra`.
 
+## Eigenvalue Problems
+
+Like the linear case, we can provide analytic derivatives for eigenvalue problems (many of which are not overridden for AD anyway).  These are problems of the form:
+```math
+A v = \lambda B v
+```
+For standard eigenvalue problems B is the identity matrix.  The user just needs to provide the matrices A, B, and some function to solve the eigenvalue problem (which could use any method).  The solver should be in the following form: `λ, V, U = eigsolve(A, B)` where λ is a vector of eigenvalues, V is a matrix with corresponding eigenvectors in the columns (i.e., λ[i] corresponds to V[:, i]), and U is a matrix whose columns contain the left eigenvectors (u^H A = λ u^H B).  The left eigenvectors must be in the same order as the right eigenvectors (i.e., U' * B * V must be diagonal).  U need not be normalized as we do that internally.  Note that if A and B are symmetric/Hermitian then U = V.  Currently only eigenvalue derivatives are provided (not eigenvector derivatives).
+Let's now see an example.
+
+```@example eigen
+using ImplicitAD
+using ForwardDiff
+using ReverseDiff
+using LinearAlgebra: eigvals, eigvecs
+
+function eigsolve(A, B)
+    λ = eigvals(A, B)
+    V = eigvecs(A, B)
+    U = eigvecs(A', B')
+    
+    return λ, V, U
+end
+
+function test(x)  
+    A = [x[1] x[2]; x[3] x[4]]
+    B = [x[5] x[6]; x[7] x[8]]
+    λ = ImplicitAD.implicit_eigval(A, B, eigsolve)  # replaced from λ, _, _ = eigsolve(A, B)
+    z = [real(λ[1]) + imag(λ[1]); real(λ[2]) + imag(λ[2])]  # just some dummy output
+    return z
+end
+
+x = [-4.0, -17.0, 2.0, 2.0, 2.5, 5.6, -4.0, 1.1]
+J1 = ForwardDiff.jacobian(test, x)
+J2 = ReverseDiff.jacobian(test, x)
+
+println(J1)
+println(maximum(abs.(J1 - J2)))
+```
+
+## Ordinary Differential Equations
+
+TODO.  For now see docstrings and unit tests.
+
 ## Custom Rules
 
 Consider now explicit (or potentially implicit) functions of the form: `y = func(x, p)` where `x` are variables and `p` are fixed parameters.  For cases where `func` is not compatible with AD, or for cases where we have a more efficient rule, we will want to insert our own derivatives into the AD chain.  This functionality could also be used for mixed-mode AD.  For example, by wrapping some large section of code in a function that we reply reverse mode AD on, then using that as a custom rule for the overall code that might be operating in forward mode.  More complex nestings are of course possible.  

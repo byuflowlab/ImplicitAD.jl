@@ -35,7 +35,7 @@ pack_dual(yv::AbstractVector, dy, T) = ForwardDiff.Dual{T}.(yv, ForwardDiff.Part
 fd_value!(val, x::AbstractArray) = map!(ForwardDiff.value, val, x)
 
 # base case 1: No partials (not a Dual number)
-fd_partials!(partials::AbstractArray, x) where {M} = (partials .= 0)
+fd_partials!(partials::AbstractArray, x) = (partials .= 0)
 
 # base case 2: Dual number
 function fd_partials!(partials::AbstractVector, x::ForwardDiff.Dual{<:Any, <:Any, N}) where {N}
@@ -94,6 +94,67 @@ function fd_partials!(partials::AbstractArray{<:Any, M},
     return partials
 end
 
+"""
+    pack_dual!(y::AbstractArray{<:ForwardDiff.Dual, L},
+                    yv::AbstractArray{<:Any, L},
+                    dy::AbstractArray{<:Any, M})
+
+Stores the primal values `vy` and partials `dy` in `y`. Here `dy[i, j, ..., :]`
+are the partials derivatives of `yv[i, j, ...]`
+
+```@example
+import ForwardDiff
+import ImplicitAD: fd_value!, fd_partials!, pack_dual!
+
+# In this example we unpack an array of duals and pack it back again
+# Somewhat pointless, but shows how things work
+
+n = (5, 2)          # Array size
+nd = 4              # Number of derivatives
+V = Int             # Type of numbers
+
+# Create an array of Dual
+x = [ForwardDiff.Dual(i, (V(i*100) .+ collect(1:nd))...) for i in 1:prod(n)]
+x = reshape(x, n)
+
+# Arrays where to unpack
+value    = zeros(V, n...)
+partials = zeros(V, n..., nd)
+
+# Unpack
+fd_value!(value, x)
+fd_partials!(partials, x)
+
+# Array where to pack
+y = zeros(ForwardDiff.Dual{Nothing, V, nd}, n)
+
+# Pack it again
+pack_dual!(y, value, partials)
+
+display(y==x) # true
+```
+"""
+function pack_dual!(y::AbstractArray{<:ForwardDiff.Dual{T, V, N}, L},
+                    yv::AbstractArray{<:Any, L},
+                    dy::AbstractArray{<:Any, M}) where {T, V, M, N, L}
+
+    # Error cases
+    @assert L == M-1 "y array expected to have $(M-1) dimensions; got L=$(L)"
+
+    for l in 1:L
+        @assert size(y, l)==size(dy, l) ""*
+            "y array expected to have size $(size(dy)[1:end-1]); got $(size(y))"
+    end
+
+    @assert N==size(dy, M) "y dual numbers expected to be length $(M); got $(N)"
+
+    cindices = CartesianIndices(size(y))
+
+    for (yi, (val, partials)) in enumerate(zip(yv, view(dy, I, :) for I in cindices))
+        y[yi] = ForwardDiff.Dual{T}(val, partials...)
+    end
+
+end
 # -----------------------------------------
 
 # ---------- core methods -----------------

@@ -150,9 +150,7 @@ function pack_dual!(y::AbstractArray{<:ForwardDiff.Dual{T, V, N}, L},
 
     cindices = CartesianIndices(size(y))
 
-    for (yi, (val, partials)) in enumerate(zip(yv, view(dy, I, :) for I in cindices))
-        y[yi] = ForwardDiff.Dual{T}(val, partials...)
-    end
+    broadcast!( (val, partials)-> ForwardDiff.Dual{T}(val, partials...) , y, yv, view(dy, I, :) for I in cindices)
 
 end
 # -----------------------------------------

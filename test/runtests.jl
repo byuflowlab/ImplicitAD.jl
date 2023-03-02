@@ -406,9 +406,7 @@ end
     @test all(isapprox.(g1, g2, atol=1e-12))
 
     # test reverse-mode ImplicitAD
-    println(g1)
-    println(g3)
-    # @test all(isapprox.(g1, g3, atol=1e-12))
+    @test all(isapprox.(g1, g3, atol=1e-11))
 
 end
 

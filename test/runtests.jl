@@ -238,14 +238,15 @@ end
         x = [1.0; 2.0; 3.0; 4.0; 5.0]
         J1 = ForwardDiff.jacobian(wrap, x)
 
-        J2 = FiniteDiff.finite_difference_jacobian(wrap, x)
+        # J2 = FiniteDiff.finite_difference_jacobian(wrap, x)
+        J2 = ReverseDiff.jacobian(wrap, x)
 
         return J1, J2
     end
 
     J1, J2 = run()
 
-    @test all(isapprox.(J1, J2, atol=2e-6))
+    @test all(isapprox.(J1, J2, atol=1e-12))
 
 end
 
@@ -328,10 +329,10 @@ end
 
 @testset "explicit_unsteady (in-place)" begin
 
-    function lotkavolterra(y, x, t)
-        dy1 = x[1]*y[1] - x[2]*y[1]*y[2]
-        dy2 = -x[3]*y[2] + x[4]*y[1]*y[2]
-        return [dy1, dy2]
+    function lotkavolterra(dy, y, x, t)
+        dy[1] = x[1]*y[1] - x[2]*y[1]*y[2]
+        dy[2] = -x[3]*y[2] + x[4]*y[1]*y[2]
+        return nothing
     end
 
     x0 = [1.5,1.0,3.0,1.0]; y0 = [1.0, 1.0]; tspan = (0.0, 10.0);
@@ -345,12 +346,16 @@ end
     function unsteady_solve(x, p=())
         _prob = OrdinaryDiffEq.remake(prob, p=x)
         sol = OrdinaryDiffEq.solve(_prob, alg, adaptive=false, tstops=t)
-        return hcat(vcat.(sol.u, sol.t)...)
+        return hcat(sol.u...), sol.t
     end
 
     # grab Tsit5 cache constants from DifferentialEquations
-    integrator = OrdinaryDiffEq.init(prob, alg, adaptive=false, tstops=t)
-    cache = integrator.cache
+    cache = OrdinaryDiffEq.Tsit5ConstantCacheActual(Float64, Float64)
+    @unpack c1,c2,c3,c4,c5,c6,a21,a31,a32,a41,a42,a43,a51,a52,a53,a54,a61,a62,a63,a64,a65,a71,a72,a73,a74,a75,a76,btilde1,btilde2,btilde3,btilde4,btilde5,btilde6,btilde7 = cache
+
+    # initialize for reuse
+    k1 = nothing; k2 = nothing; k3 = nothing
+    k4 = nothing; k5 = nothing; k6 = nothing
 
     # perform_step function
     function perform_step!(y, yprev, t, tprev, x, p)
@@ -358,24 +363,35 @@ end
             # initial conditions are prescribed
             y .= y0
         else
+
+            # initialize k vectors on first call (saved for inplace after that)
+            T = eltype(x)
+            if isnothing(k1) || eltype(k1) != T
+                k1 = similar(y, T)
+                k2 = similar(y, T)
+                k3 = similar(y, T)
+                k4 = similar(y, T)
+                k5 = similar(y, T)
+                k6 = similar(y, T)
+            end
+
             # adopted from perform_step! for the Tsit5 algorithm
-            @unpack c1,c2,c3,c4,c5,c6,a21,a31,a32,a41,a42,a43,a51,a52,a53,a54,a61,a62,a63,a64,a65,a71,a72,a73,a74,a75,a76,btilde1,btilde2,btilde3,btilde4,btilde5,btilde6,btilde7 = cache
             dt = t - tprev
-            k1 = lotkavolterra(yprev, x, t)
-            k2 = lotkavolterra(yprev+dt*a21*k1, x, t+c1*dt)
-            k3 = lotkavolterra(yprev+dt*(a31*k1+a32*k2), x, t+c2*dt)
-            k4 = lotkavolterra(yprev+dt*(a41*k1+a42*k2+a43*k3), x, t+c3*dt)
-            k5 = lotkavolterra(yprev+dt*(a51*k1+a52*k2+a53*k3+a54*k4), x, t+c4*dt)
-            k6 = lotkavolterra(yprev+dt*(a61*k1+a62*k2+a63*k3+a64*k4+a65*k5), x, t+dt)
+            lotkavolterra(k1, yprev, x, t)
+            lotkavolterra(k2, yprev+dt*a21*k1, x, t+c1*dt)
+            lotkavolterra(k3, yprev+dt*(a31*k1+a32*k2), x, t+c2*dt)
+            lotkavolterra(k4, yprev+dt*(a41*k1+a42*k2+a43*k3), x, t+c3*dt)
+            lotkavolterra(k5, yprev+dt*(a51*k1+a52*k2+a53*k3+a54*k4), x, t+c4*dt)
+            lotkavolterra(k6, yprev+dt*(a61*k1+a62*k2+a63*k3+a64*k4+a65*k5), x, t+dt)
             y .= yprev+dt*(a71*k1+a72*k2+a73*k3+a74*k4+a75*k5+a76*k6)
         end
     end
 
     # objective/loss function
-    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+    program(x) = sum(sum(unsteady_solve(x)[1]))
 
     # modified objective/loss function
-    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step!, x, ())[1:end-1,:]))
+    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step!, x, ())[1]))
 
     # compute forward-mode sensitivities using ForwardDiff
     g1 = ForwardDiff.gradient(program, x0)
@@ -413,12 +429,12 @@ end
     function unsteady_solve(x, p=())
         _prob = OrdinaryDiffEq.remake(prob, p=x)
         sol = OrdinaryDiffEq.solve(_prob, alg, adaptive=false, tstops=t)
-        return hcat(vcat.(sol.u, sol.t)...)
+        return hcat(sol.u...), sol.t
     end
 
     # grab Tsit5 cache constants from DifferentialEquations
-    integrator = OrdinaryDiffEq.init(prob, alg, adaptive=false, tstops=t)
-    cache = integrator.cache
+    cache = OrdinaryDiffEq.Tsit5ConstantCacheActual(Float64, Float64)
+    @unpack c1,c2,c3,c4,c5,c6,a21,a31,a32,a41,a42,a43,a51,a52,a53,a54,a61,a62,a63,a64,a65,a71,a72,a73,a74,a75,a76,btilde1,btilde2,btilde3,btilde4,btilde5,btilde6,btilde7 = cache
 
     # perform_step function
     function perform_step(yprev, t, tprev, x, p)
@@ -427,7 +443,6 @@ end
             y = promote_type(typeof(t), typeof(tprev), eltype(x)).(y0)
         else
             # adopted from perform_step! for the Tsit5 algorithm
-            @unpack c1,c2,c3,c4,c5,c6,a21,a31,a32,a41,a42,a43,a51,a52,a53,a54,a61,a62,a63,a64,a65,a71,a72,a73,a74,a75,a76,btilde1,btilde2,btilde3,btilde4,btilde5,btilde6,btilde7 = cache
             dt = t - tprev
             k1 = lotkavolterra(yprev, x, t)
             k2 = lotkavolterra(yprev+dt*a21*k1, x, t+c1*dt)
@@ -441,10 +456,10 @@ end
     end
 
     # objective/loss function
-    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+    program(x) = sum(sum(unsteady_solve(x)[1]))
 
     # modified objective/loss function
-    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step, x, ())[1:end-1,:]))
+    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step, x, ())[1]))
 
     # compute forward-mode sensitivities using ForwardDiff
     g1 = ForwardDiff.gradient(program, x0)
@@ -482,7 +497,7 @@ end
     function unsteady_solve(x, p=())
         _prob = OrdinaryDiffEq.remake(prob, p=x)
         sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=OrdinaryDiffEq.NoInit())
-        return hcat(vcat.(sol.u, sol.t)...)
+        return hcat(sol.u...), sol.t
     end
 
     # residual function
@@ -495,10 +510,10 @@ end
     end
 
     # objective/loss function
-    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+    program(x) = sum(sum(unsteady_solve(x)[1]))
 
     # modified objective/loss function
-    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual!, x, ())[1:end-1,:]))
+    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual!, x, ())[1]))
 
     # compute forward-mode sensitivities using ForwardDiff
     g1 = ForwardDiff.gradient(program, x0)
@@ -537,7 +552,7 @@ end
     function unsteady_solve(x, p=())
         _prob = OrdinaryDiffEq.remake(prob, p=x)
         sol = OrdinaryDiffEq.solve(_prob, alg, abstol=1e-9, reltol=1e-9, saveat=t, initializealg=OrdinaryDiffEq.NoInit())
-        return hcat(vcat.(sol.u, sol.t)...)
+        return hcat(sol.u...), sol.t
     end
 
     # residual function
@@ -550,10 +565,10 @@ end
     end
 
     # objective/loss function
-    program(x) = sum(sum(unsteady_solve(x)[1:end-1,:]))
+    program(x) = sum(sum(unsteady_solve(x)[1]))
 
     # modified objective/loss function
-    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual, x, ())[1:end-1,:]))
+    modprogram(x) = sum(sum(implicit_unsteady(unsteady_solve, residual, x, ())[1]))
 
     # compute forward-mode sensitivities using ForwardDiff
     g1 = ForwardDiff.gradient(program, x0)
@@ -579,7 +594,7 @@ end
         z = 3*y
         w = cos.(z)
         # w[1] += z[2]
-        b = w .+ [z[2]/10; zeros(length(w)-1)]
+        b = w .+ [[z[2]/10]; zeros(eltype(w), length(w)-1)]
         return b
     end
 
@@ -595,7 +610,7 @@ end
         z = [sin.(y); y[1]/1000]
         w = exp.(z)
         dydx = diagm(3*x.^2)
-        dzdy = [diagm(cos.(y)); 1.0/1000 zeros(length(y)-1)']
+        dzdy = [diagm(cos.(y)); 1.0/1000 zeros(eltype(y), length(y)-1)']
         dzdx = dzdy*dydx
         dwdz = diagm(exp.(z))
         dwdx = dwdz*dzdx
@@ -733,11 +748,11 @@ end
         V = eigvecs(A)
         U = eigvecs(A')
         U = [U[:, 2] U[:, 1]]  # reorder to match left eigenvector order
-        
+
         return λ, V, U
     end
 
-    function test1(x)  
+    function test1(x)
         A = [x[1] x[2]; x[3] 2.0]
         B = Matrix(1.0I, 2, 2)
         λ = implicit_eigval(A, B, eigsolve1)
@@ -761,7 +776,7 @@ end
         return λ, V, V
     end
 
-    function test2(x)  
+    function test2(x)
         A = [x[1] x[2]; x[2] x[3]]
         B = Matrix(1.0I, 2, 2)
         λ = ImplicitAD.implicit_eigval(A, B, eigsolve2)
@@ -782,11 +797,11 @@ end
         λ = eigvals(A, B)
         V = eigvecs(A, B)
         U = eigvecs(A', B')
-        
+
         return λ, V, U
     end
 
-    function test3(x)  
+    function test3(x)
         A = [x[1] x[2]; x[3] 2.0]
         B = [x[4] x[5]; x[6] x[7]]
         λ = ImplicitAD.implicit_eigval(A, B, eigsolve3)

@@ -32,7 +32,7 @@ end
 # ------ Overloads for explicit_unsteady ----------
 
 """
-    explicit_unsteady(solve, residual, x, p=(); drdy=drdy_forward, lsolve=linear_solve)
+    explicit_unsteady(solve, perform_step, x, p=(); compile=false)
 
 Make an explicit time-marching analysis AD compatible (specifically with ForwardDiff and
 ReverseDiff).
@@ -48,6 +48,12 @@ ReverseDiff).
     current time `t[i]`, previous time `t[i-1]`, variables `x` (vector), and fixed parameters `p` (tuple).
  - `x`: evaluation point
  - `p`: fixed parameters, default is empty tuple.
+
+# Keyword Arguments:
+ - `compile=false`: indicates whether a tape for the function `perform_step` can be safely 
+    prerecorded.  This flag is only used for reverse mode automatic differentiation and 
+    should only be set to `true` if `perform_step` does not contain any branches.  Otherwise,
+    this function may return incorrect gradients.
 """
 function explicit_unsteady(solve, perform_step, x, p=(); compile=false)
 
@@ -170,31 +176,36 @@ function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), s
     # construct function for vector jacobian product (assume parameters are constant)
     fvjp = (yprev, t, tprev, x, λ) -> λ' * perform_step(yprev, t[1], tprev[1], x, p)
 
-    # construct sample inputs
-    gyprev = similar(yv, ny)
-    gt = similar(yv, 1)
-    gtprev = similar(yv, 1)
-    gx = similar(x)
-    gλ = similar(yv, ny)
+    # construct sample inputs/outputs
+    gyprev = zeros(eltype(yv), ny)
+    gt = ones(eltype(yv), 1)
+    gtprev = zeros(eltype(yv), 1)
+    gx = zeros(eltype(x), length(x))
+    gλ = zeros(eltype(yv), ny)
+    input = (gyprev, gt, gtprev, gx, gλ)
 
-    # construct tape
-    tape = ReverseDiff.GradientTape(fvjp, (gyprev, gt, gtprev, gx, gλ))
-
-    # compile tape (optional)
-    if compile
-        tape = ReverseDiff.compile(tape)
-    end
+    # NOTE: We set tprev=0 and t=1 so that gtprev != gt. This allows the user to construct
+    # and compile the tape when the following conditions are met:
+    #   1) the only occurence of branching is when setting the initial conditions (t == tprev)
+    #   2) the initial conditions are not functions of the sensitivity parameters
 
     # construct vector-jacobian product function
-    vjp = let gt=gt, gtprev=gtprev, gλ=gλ
-
-        function outofplace_explicit_unsteady_vjp(yprev, t, tprev, x, λ)
-
+    if compile
+        # construct and compile tape
+        tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input))
+        # use tape api for vjp (valid for cases with no branching)
+        vjp = (yprev, t, tprev, x, λ) -> begin
             ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), tape, (yprev, [t], [tprev], x, λ))
-
             return gyprev, gx
         end
-
+    else
+        # construct gradient config
+        cfg = ReverseDiff.GradientConfig(input)
+        # use function api for vjp (valid for cases with branching)
+        vjp = (yprev, t, tprev, x, λ) -> begin
+            ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), fvjp, (yprev, [t], [tprev], x, λ), cfg)
+            return gyprev, gx
+        end
     end
 
     function pullback(ytbar)
@@ -229,7 +240,7 @@ function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), s
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
             @views Δybar, Δxbar = vjp(yv[:, 1], tv[1], tv[1], xbar, λ)
-            xbar = Δxbar
+            xbar = copy(Δxbar)
 
         end
 

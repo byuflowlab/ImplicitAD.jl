@@ -440,7 +440,7 @@ end
     function perform_step(yprev, t, tprev, x, p)
         if t == tprev
             # initial conditions are prescribed
-            y = promote_type(typeof(t), typeof(tprev), eltype(x)).(y0)
+            y = y0
         else
             # adopted from perform_step! for the Tsit5 algorithm
             dt = t - tprev
@@ -459,7 +459,10 @@ end
     program(x) = sum(sum(unsteady_solve(x)[1]))
 
     # modified objective/loss function
-    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step, x, ())[1]))
+    modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step, x, (); compile=false)[1]))
+
+    # modified objective/loss function (with compiled tape)
+    compiled_modprogram(x) = sum(sum(explicit_unsteady(unsteady_solve, perform_step, x, (); compile=true)[1]))
 
     # compute forward-mode sensitivities using ForwardDiff
     g1 = ForwardDiff.gradient(program, x0)
@@ -470,11 +473,17 @@ end
     # compute reverse-mode sensitivities using ImplicitAD
     g3 = ReverseDiff.gradient(modprogram, x0)
 
+    # compute reverse-mode sensitivities using ImplicitAD (with compiled vjp)
+    g4 = ReverseDiff.gradient(compiled_modprogram, x0)
+
     # test forward-mode ImplicitAD
     @test all(isapprox.(g1, g2, atol=1e-12))
 
     # test reverse-mode ImplicitAD
     @test all(isapprox.(g1, g3, atol=1e-12))
+
+    # test reverse-mode ImplicitAD (with compiled vjp)
+    @test all(isapprox.(g1, g4, atol=1e-12))
 
 end
 

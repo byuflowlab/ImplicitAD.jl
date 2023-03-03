@@ -1,13 +1,3 @@
-# explicit unsteady
-function jvp(perform_step, yprevd, t, tprev, xd, p)
-
-    # evaluate residual function
-    yd = perform_step(yprevd, t, tprev, xd, p)  # constant y
-
-    # extract partials
-    return fd_partials(yd)
-end
-
 # implicit unsteady
 function jvp(residual, y, yprevd, t, tprev, xd, p)
 
@@ -18,12 +8,6 @@ function jvp(residual, y, yprevd, t, tprev, xd, p)
     b = -fd_partials(rd)
 
     return b
-end
-
-
-# explicit unsteady
-function vjp(perform_step, yprev, t, tprev, x, p, v)
-    return ReverseDiff.gradient((yprevtilde, xtilde) -> v' * perform_step(yprevtilde, t, tprev, xtilde, p), (yprev, x))
 end
 
 # implicit unsteady
@@ -68,29 +52,35 @@ ReverseDiff).
 function explicit_unsteady(solve, perform_step, x, p=())
 
     # ---- check for in-place version and wrap as needed -------
-    new_perform_step = perform_step
-    if applicable(perform_step, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # in-place
-
-        function explicit_perform_step_wrap(yprevw, tw, tprevw, xw, pw)  # wrap perform_step function in a explicit form for convenience and ensure type of r is appropriate
-            T = promote_type(eltype(yprevw), typeof(tw), typeof(tprevw), eltype(xw))
-            yw = zeros(T, length(yprevw))  # match type of input variables
-            perform_step(yw, yprevw, tw, tprevw, xw, pw)
-            return yw
-        end
-        new_perform_step = explicit_perform_step_wrap
+    if applicable(perform_step, 1.0, 1.0, 1.0, 1.0, 1.0)  # out-of-place
+        return _outofplace_explicit_unsteady(solve, perform_step, x, p)
+    else
+        return _inplace_explicit_unsteady(solve, perform_step, x, p)
     end
 
-    return _explicit_unsteady(solve, new_perform_step, x, p)
 end
 
 # If no AD, just solve normally.
-_explicit_unsteady(solve, perform_step, x, p) = solve(x, p)
-
+_outofplace_explicit_unsteady(solve, perform_step, x, p) = solve(x, p)
+_inplace_explicit_unsteady(solve, perform_step, x, p) = solve(x, p)
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using Jacobian vector product.
-function _explicit_unsteady(solve, perform_step, x::AbstractVector{<:ForwardDiff.Dual{T}}, p) where {T}
+function _outofplace_explicit_unsteady(solve, perform_step, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p) where {T,V,N}
 
-    # evaluate solver
+    # wrap out-of-place function as in-place
+    perform_step! = (yw, yprevw, tw, tprevw, xw, pw) -> begin
+        yw .= perform_step(yprevw, tw, tprevw, xw, pw)
+        return yw
+    end
+
+    # now call in-place version
+    return _inplace_explicit_unsteady(solve, perform_step!, x, p)
+end
+
+# Overloaded for ForwardDiff inputs, providing exact derivatives using Jacobian vector product.
+function _inplace_explicit_unsteady(solve, perform_step!, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p) where {T,V,N}
+
+    # find values
     xv = fd_value(x)
     yv, tv = solve(xv, p)
 
@@ -98,48 +88,88 @@ function _explicit_unsteady(solve, perform_step, x::AbstractVector{<:ForwardDiff
     ny, nt = size(yv)
 
     # initialize output
-    yd = similar(yv, ForwardDiff.Dual{T}, ny, nt)
+    yd = similar(yv, ForwardDiff.Dual{T,V,N}, ny, nt)
+
+    # function barrier for actual computations
+    return _inplace_explicit_unsteady!(yd, yv, tv, perform_step!, x, p)
+end
+
+# function barrier for actual computations
+function _inplace_explicit_unsteady!(yd, yv, tv, perform_step!, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p) where {T,V,N}
 
     # --- Initial Time Step --- #
 
-    # solve for Jacobian-vector products
-    @views ydot = jvp(perform_step, yv[:, 1], tv[1], tv[1], x, p)
+    # # solve for Jacobian-vector product
+    # perform_step!(view(yd,:,1), view(yv,:,1), tv[1], tv[1], x, p)
 
-    # # repack in ForwardDiff Dual
+    ydotd = similar(x, size(yd, 1))
+
+    # combine values and partials
+    perform_step!(ydotd, yv[:,1], tv[1], tv[1], x, p)
+    ydot = fd_partials(ydotd)
+
     @views yd[:, 1] = pack_dual(yv[:, 1], ydot, T)
+
+    # for iy = 1:size(yd, 1)
+    #     yd[iy, 1] = ForwardDiff.Dual{T,V,N}(yv[iy,1], yd[iy,1].partials)
+    # end
 
     # --- Additional Time Steps --- #
 
-    for i = 2:nt
+    for it = 2:size(yd, 2)
 
-        # solve for Jacobian-vector product
-        @views ydot = jvp(perform_step, yd[:, i-1], tv[i], tv[i-1], x, p)
+        # # solve for Jacobian-vector product
+        # perform_step!(view(yd,:,it), view(yd,:,it-1), tv[it], tv[it-1], x, p)
 
-        # repack in ForwardDiff Dual
-        @views yd[:, i] = pack_dual(yv[:, i], ydot, T)
+        # combine values and partials
+        perform_step!(ydotd, yd[:,it-1], tv[it], tv[it-1], x, p)
+        ydot = fd_partials(ydotd)
 
+        @views yd[:, it] = pack_dual(yv[:, it], ydot, T)
+
+        # # combine values and partials
+        # for iy = 1:size(yd, 1)
+        #     yd[iy, it] = ForwardDiff.Dual{T,V,N}(yv[iy,it], yd[iy,it].partials)
+        # end
     end
 
     return yd, tv
 end
 
-
 # ReverseDiff needs single array output so unpack before returning to user
-_explicit_unsteady(solve, perform_step, x::ReverseDiff.TrackedArray, p) = eu_unpack_reverse(solve, perform_step, x, p)
-_explicit_unsteady(solve, perform_step, x::AbstractVector{<:ReverseDiff.TrackedReal}, p) = eu_unpack_reverse(solve, perform_step, x, p)
+_inplace_explicit_unsteady(solve, perform_step!, x::ReverseDiff.TrackedArray, p) = ieu_unpack_reverse(solve, perform_step!, x, p)
+_outofplace_explicit_unsteady(solve, perform_step, x::AbstractVector{<:ReverseDiff.TrackedReal}, p) = oeu_unpack_reverse(solve, perform_step, x, p)
+
+function _inplace_explicit_unsteady_reverse(solve, perform_step!, x, p)
+
+    # wrap in-place function as out-of-place
+    perform_step = (yprevw, tw, tprevw, xw, pw) -> begin
+        T = promote_type(eltype(yprevw), typeof(tw), typeof(tprevw), eltype(xw))
+        yw = zeros(T, length(yprevw))
+        perform_step!(yw, yprevw, tw, tprevw, xw, pw)
+        return yw
+    end
+
+    # now call out-of-place version
+    return _outofplace_explicit_unsteady_reverse(solve, perform_step, x, p)
+end
 
 # just declaring dummy function for below
-function _explicit_unsteady_reverse(solve, perform_step, x, p) end
+function _outofplace_explicit_unsteady_reverse(solve, perform_step, x, p) end
 
 # unpack for user
-function eu_unpack_reverse(solve, perform_step, x, p)
-    yt = _explicit_unsteady_reverse(solve, perform_step, x, p)
+function ieu_unpack_reverse(solve, perform_step!, x, p)
+    yt = _inplace_explicit_unsteady_reverse(solve, perform_step!, x, p)
     return yt[1:end-1, :], yt[end, :]
 end
 
+function oeu_unpack_reverse(solve, perform_step, x, p)
+    yt = _outofplace_explicit_unsteady_reverse(solve, perform_step, x, p)
+    return yt[1:end-1, :], yt[end, :]
+end
 
 # Provide a ChainRule rule for reverse mode
-function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perform_step, x, p)
+function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), solve, perform_step, x, p)
 
     # evaluate solver
     yv, tv = solve(x, p)
@@ -151,6 +181,36 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
     yv = copy(yv)
     tv = copy(tv)
 
+    # construct function for vector jacobian product (assume parameters are constant)
+    fvjp = (yprev, t, tprev, x, λ) -> λ' * perform_step(yprev, t[1], tprev[1], x, p)
+
+    # construct sample inputs
+    gyprev = similar(yv, ny)
+    gt = similar(yv, 1)
+    gtprev = similar(yv, 1)
+    gx = similar(x)
+    gλ = similar(yv, ny)
+
+    # construct tape
+    tape = ReverseDiff.GradientTape(fvjp, (gyprev, gt, gtprev, gx, gλ))
+
+    # compile tape (optional)
+    # if compile
+    #     tape = ReverseDiff.compile(tape)
+    # end
+
+    # construct vector-jacobian product function
+    vjp = let gt=gt, gtprev=gtprev, gλ=gλ
+
+        function outofplace_explicit_unsteady_vjp(yprev, t, tprev, x, λ)
+
+            ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), tape, (yprev, [t], [tprev], x, λ))
+
+            return gyprev, gx
+        end
+
+    end
+
     function pullback(ytbar)
 
         @views ybar = ytbar[1:end-1, :]
@@ -159,28 +219,28 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
 
             # --- Final Time Step --- #
             @views λ = ybar[:, nt]
-            @views Δybar, Δxbar = vjp(perform_step, yv[:, nt-1], tv[nt], tv[nt-1], x, p, λ)
+            @views Δybar, Δxbar = vjp(yv[:, nt-1], tv[nt], tv[nt-1], x, λ)
             xbar = Δxbar
             @views ybar[:, nt-1] += Δybar
 
             # --- Additional Time Steps --- #
             for i = nt-1:-1:2
                 @views λ = ybar[:, i]
-                @views Δybar, Δxbar = vjp(perform_step, yv[:, i-1], tv[i], tv[i-1], x, p, λ)
+                @views Δybar, Δxbar = vjp(yv[:, i-1], tv[i], tv[i-1], x, λ)
                 xbar += Δxbar
                 @views ybar[:, i-1] += Δybar
             end
 
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
-            @views Δybar, Δxbar = vjp(perform_step, yv[:, 1], tv[1], tv[1], xbar, p, λ)
+            @views Δybar, Δxbar = vjp(yv[:, 1], tv[1], tv[1], xbar, λ)
             xbar += Δxbar
 
         else
 
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
-            @views Δybar, Δxbar = vjp(perform_step, yv[:, 1], tv[1], tv[1], xbar, p, λ)
+            @views Δybar, Δxbar = vjp(yv[:, 1], tv[1], tv[1], xbar, λ)
             xbar = Δxbar
 
         end
@@ -192,9 +252,8 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
 end
 
 # register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules _explicit_unsteady_reverse(solve, perform_step, x::TrackedArray, p)
-ReverseDiff.@grad_from_chainrules _explicit_unsteady_reverse(solve, perform_step, x::AbstractVector{<:TrackedReal}, p)
-
+ReverseDiff.@grad_from_chainrules _outofplace_explicit_unsteady_reverse(solve, perform_step!, x::TrackedArray, p)
+ReverseDiff.@grad_from_chainrules _outofplace_explicit_unsteady_reverse(solve, perform_step!, x::AbstractVector{<:TrackedReal}, p)
 
 # ------ Overloads for implicit_unsteady ----------
 

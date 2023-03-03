@@ -108,19 +108,20 @@ function _inplace_explicit_unsteady!(yd, yv, tv, perform_step!, x::AbstractVecto
     # solve for Jacobian-vector product
     perform_step!(view(yd,:,1), view(yv,:,1), tv[1], tv[1], x, p)
 
-    for iy = 1:size(yd, 1)
+    # combine values and partials
+    @inbounds for iy in axes(yd, 1)
         yd[iy, 1] = ForwardDiff.Dual{T,V,N}(yv[iy,1], yd[iy,1].partials)
     end
 
     # --- Additional Time Steps --- #
 
-    for it = 2:size(yd, 2)
+    @inbounds for it in axes(yd, 2)[2:end]
 
         # solve for Jacobian-vector product
         perform_step!(view(yd,:,it), view(yd,:,it-1), tv[it], tv[it-1], x, p)
 
         # combine values and partials
-        for iy = 1:size(yd, 1)
+        @inbounds for iy in axes(yd, 1)
             yd[iy, it] = ForwardDiff.Dual{T,V,N}(yv[iy,it], yd[iy,it].partials)
         end
     end
@@ -173,17 +174,6 @@ function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), s
     yv = copy(yv)
     tv = copy(tv)
 
-    # construct function for vector jacobian product (assume parameters are constant)
-    fvjp = (yprev, t, tprev, x, λ) -> λ' * perform_step(yprev, t[1], tprev[1], x, p)
-
-    # construct sample inputs/outputs
-    gyprev = zeros(eltype(yv), ny)
-    gt = ones(eltype(yv), 1)
-    gtprev = zeros(eltype(yv), 1)
-    gx = zeros(eltype(x), length(x))
-    gλ = zeros(eltype(yv), ny)
-    input = (gyprev, gt, gtprev, gx, gλ)
-
     # NOTE: We set tprev=0 and t=1 so that gtprev != gt. This allows the user to construct
     # and compile the tape when the following conditions are met:
     #   1) the only occurence of branching is when setting the initial conditions (t == tprev)
@@ -191,6 +181,15 @@ function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), s
 
     # construct vector-jacobian product function
     if compile
+        # construct function for vector jacobian product (assume parameters are constant)
+        fvjp = (yprev, t, tprev, x, λ) -> λ' * perform_step(yprev, t[1], tprev[1], x, p)
+        # construct sample inputs/outputs
+        gyprev = zeros(eltype(yv), ny)
+        gt = ones(eltype(yv), 1)
+        gtprev = zeros(eltype(yv), 1)
+        gx = zeros(eltype(x), length(x))
+        gλ = zeros(eltype(yv), ny)
+        input = (gyprev, gt, gtprev, gx, gλ)
         # construct and compile tape
         tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input))
         # use tape api for vjp (valid for cases with no branching)
@@ -199,55 +198,70 @@ function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), s
             return gyprev, gx
         end
     else
-        # construct gradient config
-        cfg = ReverseDiff.GradientConfig(input)
+        # # NOTE: The memory for Δxbar and Δybar is reused during each call to vjp in this 
+        # # version. A copy may therefore be necessary to avoid overwriting xbar.
+        #
+        # # construct sample inputs/outputs
+        # gyprev = zeros(eltype(yv), ny)
+        # gx = zeros(eltype(x), length(x))
+        # input = (gyprev, gx)
+        # # construct gradient config
+        # cfg = ReverseDiff.GradientConfig(input)
         # use function api for vjp (valid for cases with branching)
+        # vjp = (yprev, t, tprev, x, λ) -> begin
+        #     fvjp = (yprev, x) -> λ' * perform_step(yprev, t[1], tprev[1], x, p)
+        #     return ReverseDiff.gradient!((gyprev, gx), fvjp, (yprev, x), cfg)
+        # end
+
         vjp = (yprev, t, tprev, x, λ) -> begin
-            ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), fvjp, (yprev, [t], [tprev], x, λ), cfg)
-            return gyprev, gx
+            fvjp = (yprev, x) -> λ' * perform_step(yprev, t[1], tprev[1], x, p)
+            return ReverseDiff.gradient(fvjp, (yprev, x))
         end
     end
 
-    function pullback(ytbar)
+    function explicit_unsteady_pullback(ytbar)
 
+        # separate inputs
         @views ybar = ytbar[1:end-1, :]
+
+        # initialize outputs
+        xbar = similar(x)
 
         if nt > 1
 
-            # NOTE: The memory for Δxbar and Δybar is reused during each call to vjp
 
             # --- Final Time Step --- #
             @views λ = ybar[:, nt]
             @views Δybar, Δxbar = vjp(yv[:, nt-1], tv[nt], tv[nt-1], x, λ)
-            xbar = copy(Δxbar) # copy necessary to avoid overwriting xbar
-            @views ybar[:, nt-1] += Δybar
+            xbar = Δxbar # copy may be necessary here to avoid overwriting xbar
+            @views ybar[:, nt-1] .+= Δybar
 
             # --- Additional Time Steps --- #
             for i = nt-1:-1:2
                 @views λ = ybar[:, i]
                 @views Δybar, Δxbar = vjp(yv[:, i-1], tv[i], tv[i-1], x, λ)
-                xbar += Δxbar
-                @views ybar[:, i-1] += Δybar
+                xbar .+= Δxbar
+                @views ybar[:, i-1] .+= Δybar
             end
 
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
             @views Δybar, Δxbar = vjp(yv[:, 1], tv[1], tv[1], xbar, λ)
-            xbar += Δxbar
+            xbar .+= Δxbar
 
         else
 
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
             @views Δybar, Δxbar = vjp(yv[:, 1], tv[1], tv[1], xbar, λ)
-            xbar = copy(Δxbar)
+            xbar = Δxbar
 
         end
 
         return NoTangent(), NoTangent(), NoTangent(), xbar, NoTangent(), NoTangent()
     end
 
-    return [yv; tv'], pullback
+    return [yv; tv'], explicit_unsteady_pullback
 end
 
 # register above rule for ReverseDiff

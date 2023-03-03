@@ -50,84 +50,55 @@ ReverseDiff).
  - `p`: fixed parameters, default is empty tuple.
 
 # Keyword Arguments:
- - `compile=false`: indicates whether a tape for the function `perform_step` can be safely 
-    prerecorded.  This flag is only used for reverse mode automatic differentiation and 
+ - `compile=false`: indicates whether a tape for the function `perform_step` can be safely
+    prerecorded.  This flag is only used for reverse mode automatic differentiation and
     should only be set to `true` if `perform_step` does not contain any branches.  Otherwise,
     this function may return incorrect gradients.
 """
 function explicit_unsteady(solve, perform_step, x, p=(); compile=false)
 
-    # ---- check for in-place version and wrap as needed -------
+    perform_step! = perform_step
+
+    # if out of place - make in-place
     if applicable(perform_step, 1.0, 1.0, 1.0, 1.0, 1.0)  # out-of-place
-        return _outofplace_explicit_unsteady(solve, perform_step, x, p, compile)
-    else
-        return _inplace_explicit_unsteady(solve, perform_step, x, p, compile)
+        perform_step! = (yw, yprevw, tw, tprevw, xw, pw) -> begin
+            yw .= perform_step(yprevw, tw, tprevw, xw, pw)
+        end
     end
+
+    return _explicit_unsteady(solve, perform_step!, x, p)
 
 end
 
 # If no AD, just solve normally.
-_outofplace_explicit_unsteady(solve, perform_step, x, p, compile) = solve(x, p)
-_inplace_explicit_unsteady(solve, perform_step, x, p, compile) = solve(x, p)
+_explicit_unsteady(solve, perform_step!, x, p) = solve(x, p)
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using Jacobian vector product.
-function _outofplace_explicit_unsteady(solve, perform_step, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p, compile) where {T,V,N}
+function _explicit_unsteady(solve, perform_step!, x::AbstractVector{<:ForwardDiff.Dual{T}}, p) where {T}
 
-    # wrap out-of-place function as in-place
-    perform_step! = (yw, yprevw, tw, tprevw, xw, pw) -> begin
-        yw .= perform_step(yprevw, tw, tprevw, xw, pw)
-        return yw
-    end
-
-    # now call in-place version
-    return _inplace_explicit_unsteady(solve, perform_step!, x, p, compile)
-end
-
-# Overloaded for ForwardDiff inputs, providing exact derivatives using Jacobian vector product.
-function _inplace_explicit_unsteady(solve, perform_step!, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p, compile) where {T,V,N}
-
-    # find values
+    # evaluate solver
     xv = fd_value(x)
     yv, tv = solve(xv, p)
 
     # get solution dimensions
     ny, nt = size(yv)
 
-    # initialize output
-    yd = similar(yv, ForwardDiff.Dual{T,V,N}, ny, nt)
-
-    # function barrier for actual computations
-    return _inplace_explicit_unsteady!(yd, yv, tv, perform_step!, x, p, compile)
-end
-
-# function barrier for actual computations
-function _inplace_explicit_unsteady!(yd, yv, tv, perform_step!, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p, compile) where {T,V,N}
+    # initialize output and caches
+    yd = similar(x, ny, nt)
 
     # --- Initial Time Step --- #
 
-    # solve for Jacobian-vector product
-    perform_step!(view(yd,:,1), view(yv,:,1), tv[1], tv[1], x, p)
+    # solve for Jacobian-vector products
+    perform_step!(view(yd, :, 1), view(yv, :, 1), tv[1], tv[1], x, p)
 
-    # combine values and partials
-    @inbounds for iy in axes(yd, 1)
-        yd[iy, 1] = ForwardDiff.Dual{T,V,N}(yv[iy,1], yd[iy,1].partials)
-    end
+    # --- Additional Time Steps ---
 
-    # --- Additional Time Steps --- #
-
-    @inbounds for it in axes(yd, 2)[2:end]
-
-        # solve for Jacobian-vector product
-        perform_step!(view(yd,:,it), view(yd,:,it-1), tv[it], tv[it-1], x, p)
-
-        # combine values and partials
-        @inbounds for iy in axes(yd, 1)
-            yd[iy, it] = ForwardDiff.Dual{T,V,N}(yv[iy,it], yd[iy,it].partials)
-        end
+    for i = 2:nt
+        perform_step!(view(yd, :, i), view(yd, :, i-1), tv[i], tv[i-1], x, p)
     end
 
     return yd, tv
-end
+
 
 # ReverseDiff needs single array output so unpack before returning to user
 _inplace_explicit_unsteady(solve, perform_step!, x::ReverseDiff.TrackedArray, p, compile) = ieu_unpack_reverse(solve, perform_step!, x, p, compile)
@@ -198,7 +169,7 @@ function ChainRulesCore.rrule(::typeof(_outofplace_explicit_unsteady_reverse), s
             return gyprev, gx
         end
     else
-        # # NOTE: The memory for Δxbar and Δybar is reused during each call to vjp in this 
+        # # NOTE: The memory for Δxbar and Δybar is reused during each call to vjp in this
         # # version. A copy may therefore be necessary to avoid overwriting xbar.
         #
         # # construct sample inputs/outputs

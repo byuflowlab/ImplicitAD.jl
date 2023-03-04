@@ -135,9 +135,8 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
     input = (gyprev, gt, gtprev, gx, gλ)
 
     # allocate cache
-    # TODO: need to run reversediff once, or forget about preallocating
-    TT = ReverseDiff.TrackedReal{Float64, Float64, ReverseDiff.TrackedArray{Float64, Float64, 1, Vector{Float64}, Vector{Float64}}}
-    ycache = similar(yv, TT, ny)
+    TRD = eltype(ReverseDiff.track(perform_step!(zeros(ny), gyprev, gt[1], gtprev[1], gx, p)))
+    ycache = similar(yv, TRD, ny)
 
     # vector jacobian product
     function fvjp(yprev, t, tprev, x, λ)
@@ -148,8 +147,9 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
     # construct and compile tape
     # if compile && nt > 1
 
+    cfg = ReverseDiff.GradientConfig(input)
     # TODO: always using tape for now
-    tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input))
+    tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input, cfg))
 
     # use tape api for vjp (valid for cases with no branching)
     function vjp_tape(yprev, t, tprev, x, λ)
@@ -159,7 +159,7 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
 
     # if no tape, just perform reverse diff - branching ok
     function vjp_notape(yprev, t, tprev, x, λ)
-        ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), fvjp, (yprev, [t], [tprev], x, λ))
+        ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), fvjp, (yprev, [t], [tprev], x, λ), cfg)
         return gyprev, gx
     end
 

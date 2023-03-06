@@ -128,7 +128,7 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
 
     # allocate inputs
     gyprev = similar(yv, ny)
-    gt = ones(1)  # gt and gtprev must differ so we catch the main branch
+    gt = ones(1)  # gt and gtprev must differ so we catch the main branch (TODO: probably create an initialize function)
     gtprev = zeros(1)
     gx = similar(x)
     gλ = similar(yv, ny)
@@ -144,23 +144,24 @@ function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, perfo
         return λ' * ycache
     end
 
-    # construct and compile tape
-    # if compile && nt > 1
-
-    cfg = ReverseDiff.GradientConfig(input)
-    # TODO: always using tape for now
-    tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input, cfg))
-
-    # use tape api for vjp (valid for cases with no branching)
-    function vjp_tape(yprev, t, tprev, x, λ)
-        ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), tape, (yprev, [t], [tprev], x, λ))
-        return gyprev, gx
-    end
-
     # if no tape, just perform reverse diff - branching ok
     function vjp_notape(yprev, t, tprev, x, λ)
         ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), fvjp, (yprev, [t], [tprev], x, λ), cfg)
         return gyprev, gx
+    end
+
+    vjp_tape = vjp_notape  # default is to not use record tape
+
+    # construct and compile tape
+    if compile && nt > 1
+        cfg = ReverseDiff.GradientConfig(input)
+        tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input, cfg))
+
+        # use tape api for vjp (valid for cases with no branching)
+        vjp_tape = (yprev, t, tprev, x, λ) -> begin
+            ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), tape, (yprev, [t], [tprev], x, λ))
+            return gyprev, gx
+        end
     end
 
     function explicit_unsteady_pullback(ytbar)

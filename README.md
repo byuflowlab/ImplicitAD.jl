@@ -4,7 +4,7 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/dev/)
 [![Build Status](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
-**Summary**: Make implicit functions compatible with algorithmic differentiation without differenting inside the solvers. Also allow for custom rules with explicit functions (e.g., calling external code, mixed mode AD).
+**Summary**: Automate adjoints: make implicit functions compatible with algorithmic differentiation without differenting inside the solvers. Also allow for custom rules with explicit functions (e.g., calling external code, mixed mode AD).
 
 **Author**: Andrew Ning and Taylor McDonnell
 
@@ -13,10 +13,10 @@
 - Compatible with ForwardDiff and ReverseDiff
 - Compatible with any solver (no differentiation occurs inside the solver)
 - Simple drop in functionality
-- Customizable subfunctions to accommodate different use cases
-- Version for ordinary differentiation equations (i.e., discrete adjoint)
-- Analytic overrides for linear systems (more efficient)
-- Analytic overrides for eigenvalue problems (more efficient)
+- Customizable subfunctions to accommodate different use cases like iterative linear solvers, custom Jacobian vector products, etc.
+- Version for ordinary differentiation equations (i.e., discrete unsteady adjoint)
+- Analytic overrides for linear systems
+- Analytic overrides for eigenvalue problems
 - Can provide custom rules to be inserted into the AD chain. Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).
 
 **Implicit Motivation**:
@@ -52,4 +52,4 @@ pkg> test
 
 **Other Packages**:
 
-[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) (a simplified version of the first package) are other prior implementations of the nonlinear case.  These two support ChainRules compatible packages and iterative linear solvers, whereas we have focused on ForwardDiff and ReverseDiff (though it will also work with ChainRules packages in reverse mode) and we support both direct and iterative solvers.  We've also added specialized rules for linear solvers, and ordinary differential equations in the form of a discrete adjoint (or discrete direct/forward mode).  [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/), which looks to support a wide range of AD packages and also allows custom linear solvers.
+[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) are other prior implementations of the nonlinear case. [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous unsteady adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/).

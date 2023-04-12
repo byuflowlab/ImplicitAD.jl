@@ -75,7 +75,8 @@ function odesolve(initialize, onestep!, t, xd, xc, p)
     @views y0 = initialize(t[1], xd, xc[:, 1], p)
 
     # allocate array
-    y = zeros(length(y0), length(t))
+    T = promote_type(eltype(xd), eltype(xc))
+    y = zeros(T, length(y0), length(t))
     @views y[:, 1] .= y0
 
     # step through

@@ -30,149 +30,129 @@ end
 
 # ------ Overloads for explicit_unsteady ----------
 
-"""
-    explicit_unsteady(solve, initialize, perform_step, x, p=(); cache=nothing)
+# convert function to in-place if written in out-of-place manner.
+# allocations occur elsewhere
+function _make_onestep_inplace(onestep)
+    if applicable(onestep, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0)  # out-of-place if only 6 arguments
+       return (y, yprev, t, tprev, xd, xci, p) -> begin
+            y .= perform_step(yprev, t, tprev, xd, xci, p)
+        end
+    else
+        return onestep
+    end
+end
 
-Make adjoint more efficienet for time-marching analysis.
+
+"""
+    explicit_unsteady(initialize, onestep, solve, t, xd, xc, p=(); cache=nothing)
+
+Make reverse-mode efficient for explicit ODEs
+Builds tape over each time step separately and analytically propagates between,
+rather than recording a long tape over the entire time sequence.
 
 # Arguments:
- - `solve::function`: function `y, t = solve(x, p)`.  Perform a time marching analysis,
-    and return the matrix `y = [y[1] y[2] y[3] ... y[N]] where `y[i]` is the state vector at time step `i` (each row is a state, each columm is a timesteps)
-    and vector t = [t[1], t[2], t[3] ... t[N]]` where `t[i]` is the corresponding time,
-    for input variables `x`, and fixed variables `p`.
- - `initialize::function`: `y0 = initialize(t0, x, p)`.  Return starting state variables.
- - `perform_step::function`: Either `y[i] = perform_step(y[i-1], t[i], t[i-1], x, p)` or
-    in-place `perform_step!(y[i], y[i-1], t[i], t[i-1], x, p)`. Set the next set of state
-    variables `y[i]` (scalar or vector), given the previous state `y[i-1]` (scalar or vector),
-    current time `t[i]`, previous time `t[i-1]`, variables `x` (vector), and fixed parameters `p` (tuple).
- - `x::vector{float}`: evaluation point
- - `p::tuple`: fixed parameters, default is empty tuple.
+- `initialize::function`: Return initial state variables.  `y0 = initialize(t0, xd, xc0, p)`. May or may not depend
+    on t0 (initial time), xd (design variables), xc0 (initial control variables), p (fixed parameters)
+- `onestep::function`: define how states are updated (assuming one-step methods). `y = onestep(yprev, t, tprev, xd, xci, p)`
+    or in-place `onestep!(y, yprev, t, tprev, xd, xci, p)`.  Set the next set of state variables `y`, given the previous state `yprev`,
+    current time `t`, previous time `tprev`, design variables `xd`, current control variables `xc`, and fixed parameters `p`.
+- `t::vector{float}`: time steps that simulation runs across
+- `xd::vector{float}`: design variables, don't change in time, but do change from one run to the next (otherwise they would be parameters)
+- `xc::matrix{float}`, size nxc x nt: control variables. xc[:, i] are the control variables at the ith time step.
+- `p::tuple`: fixed parameters, i.e., they are always constant and so do not affect derivatives.  Default is empty tuple.
 
 # Keyword Arguments:
  - `cache=nothing`: see `explicit_unsteady_cache`.  If computing derivatives more than once, you should compute the
     cache beforehand the save for later iterations.  Otherwise, it will be created internally.
 """
-explicit_unsteady(solve, initialize, perform_step, x, p=(); cache=nothing) = _explicit_unsteady(solve, initialize, perform_step, x, p, cache)
-
-# If no AD just solve normally.
-_explicit_unsteady(solve, initialize, perform_step, x, p, cache) = solve(x, p)
+explicit_unsteady(initialize, onestep, t, xd, xc, p=(); cache=nothing) = _explicit_unsteady(initialize, _make_onestep_inplace(onestep), t, xd, xc, p, cache)
 
 
-# Overloaded for ForwardDiff
-function _explicit_unsteady(solve, initialize, perform_step, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, cache) where {T}
+# solve the ODE, stepping in time, using the provided onestep function
+function odesolve(initialize, onestep!, t, xd, xc, p)
 
-    # evaluate solver
-    xv = fd_value(x)
-    yv, tv = solve(xv, p)  # TODO: if we have explicit (not adaptive) time steps we can skip this
+    # initialization step
+    @views y0 = initialize(t[1], xd, xc[:, 1], p)
 
-    # get solution dimensions
-    ny, nt = size(yv)
+    # allocate array
+    y = zeros(length(y0), length(t))
+    @views y[:, 1] .= y0
 
-    # initialize output and caches
-    yd = similar(x, ny, nt)
-
-    # --- Initial Time Step --- #
-    # solve for Jacobian-vector products
-    @views yd[:, 1] = initialize(tv[1], x, p)
-
-    # --- Additional Time Steps ---
-    perform_step! = _make_perform_step_inplace(perform_step)
-    @views for i = 2:nt
-        perform_step!(yd[:, i], yd[:, i-1], tv[i], tv[i-1], x, p)
+    # step through
+    nt = length(t)
+    for i = 2:nt
+        @views onestep!(y[:, i], y[:, i-1], t[i], t[i-1], xd, xc[:, i], p)
     end
 
-    return yd, tv
+    return y
 end
+
+
+# If no AD, or forward, just solve normally.
+_explicit_unsteady(initialize, onestep!, t, xd, xc, p, cache) = odesolve(initialize, onestep!, t, xd, xc, p)
 
 
 # ReverseDiff cases
-_explicit_unsteady(solve, initialize, perform_step, x::ReverseDiff.TrackedArray, p, cache) = _explicit_unsteady_reverse_wrapper(solve, initialize, perform_step, x, p, cache)
-_explicit_unsteady(solve, initialize, perform_step, x::AbstractVector{<:ReverseDiff.TrackedReal}, p, cache) = _explicit_unsteady_reverse_wrapper(solve, initialize, perform_step, x, p, cache)
-
-# just declaring dummy function for below (never called directly)
-function _explicit_unsteady_reverse(solve, initialize, perform_step, x, p, cache) end
-
-# ReverseDiff needs single array output (y and t concatenated) so unpack before returning to user to match returns of solve
-function _explicit_unsteady_reverse_wrapper(solve, initialize, perform_step, x, p, cache)
-
-    yt = _explicit_unsteady_reverse(solve, initialize, perform_step, x, p, cache)
-
-    # separate out state and time
-    return yt[1:end-1, :], yt[end, :]
-end
-
-# make perform_step behave as in-place
-function _make_perform_step_inplace(perform_step)
-    if applicable(perform_step, 1.0, 1.0, 1.0, 1.0, 1.0)  # out-of-place
-       return (yw, yprevw, tw, tprevw, xw, pw) -> begin
-            yw .= perform_step(yprevw, tw, tprevw, xw, pw)
-        end
-    else
-        return perform_step
-    end
-end
 
 """
-    explicit_unsteady_cache(initialize, perform_step, x, p; compile=false)
+    explicit_unsteady_cache(initialize, onestep!, ny, xd, xc, p=(); compile=false)
 
-Initialize arrays and functions needed for explicit_unsteady
+Initialize arrays and functions needed for explicit_unsteady reverse mode
 
 # Arguments
-- `initialize::function`: `y0 = initialize(t0, x, p)`.  Return starting state variables.
-- `perform_step::function`: Either `y[i] = perform_step(y[i-1], t[i], t[i-1], x, p)` or
-    in-place `perform_step!(y[i], y[i-1], t[i], t[i-1], x, p)`. Set the next set of state
-    variables `y[i]` (scalar or vector), given the previous state `y[i-1]` (scalar or vector),
-    current time `t[i]`, previous time `t[i-1]`, variables `x` (vector), and fixed parameters `p` (tuple).
-- `x::vector{float}`: evaluation point
-- `p::tuple`: fixed parameters, default is empty tuple.
-- `compile::bool`: indicates whether a tape for the function `perform_step` can be
-   prerecorded.  Will be much faster but should only be `true` if `perform_step` does not contain any branches.
+- `initialize::function`: Return initial state variables.  `y0 = initialize(t0, xd, xc0, p)`. May or may not depend
+    on t0 (initial time), xd (design variables), xc0 (initial control variables), p (fixed parameters)
+- `onestep::function`: define how states are updated (assuming one-step methods). `y = onestep(yprev, t, tprev, xd, xci, p)`
+    or in-place `onestep!(y, yprev, t, tprev, xd, xci, p)`.  Set the next set of state variables `y`, given the previous state `yprev`,
+    current time `t`, previous time `tprev`, design variables `xd`, current control variables `xc`, and fixed parameters `p`.
+- `ny::int`: number of states
+- `nxd::int`: number of design variables
+- `nxc::int`: number of control variables (at a given time step)
+- `p::tuple`: fixed parameters, i.e., they are always constant and so do not affect derivatives.  Default is empty tuple.
+- `compile::bool`: indicates whether the tape for the function `onestep` can be
+   prerecorded.  Will be much faster but should only be `true` if `onestep` does not contain any branches.
    Otherwise, ReverseDiff may return incorrect gradients.
 """
-function explicit_unsteady_cache(initialize, perform_step, x, p=(); compile=false)
+function explicit_unsteady_cache(initialize, onestep, ny, nxd, nxc, p=(); compile=false)
 
-    # need size of y
-    y0 = initialize([1.0], x, p)
+    # convert to inplace
+    onestep! = _make_onestep_inplace(onestep)
 
-    # allocate inputs
-    gyprev = ones(length(y0))
-    gt = ones(1)
-    gtprev = zeros(1)
-    gx = ones(length(x))
-    gλ = ones(length(y0))
-
-    # if out of place - make in-place
-    perform_step! = _make_perform_step_inplace(perform_step)
-
-    # allocate cache
-    TRD = eltype(ReverseDiff.track(perform_step!(zeros(length(y0)), gyprev, gt[1], gtprev[1], gx, p)))
-    ycache = similar(y0, TRD)
+    # allocate y variable for one time step
+    T = eltype(ReverseDiff.track([1.0]))  # TODO: is this always the same?
+    yone = Vector{T}(undef, ny)
 
     # vector jacobian product
-    function fvjp(yprev, t, tprev, x, λ)
-        perform_step!(ycache, yprev, t[1], tprev[1], x, p)
-        return λ' * ycache
+    function fvjp(yprev, t, tprev, xd, xci, λ)
+        onestep!(yone, yprev, t[1], tprev[1], xd, xci, p)
+        return λ' * yone
     end
 
-    # config
-    input = (gyprev, gt, gtprev, gx, gλ)
+    # allocate space for gradients
+    gyprev = zeros(ny)
+    gt = zeros(1)
+    gtprev = zeros(1)
+    gxd = zeros(nxd)
+    gxci = zeros(nxc)
+    gλ = zeros(ny)
+    input = (gyprev, gt, gtprev, gxd, gxci, gλ)
     cfg = ReverseDiff.GradientConfig(input)
 
     # version with no tape
-    vjp_step = (yprev, t, tprev, x, λ) -> begin
-        ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), fvjp, (yprev, [t], [tprev], x, λ), cfg)
-        return gyprev, gx
+    vjp_step = (yprev, t, tprev, xd, xci, λ) -> begin
+        ReverseDiff.gradient!((gyprev, gt, gtprev, gxd, gxci, gλ), fvjp, (yprev, [t], [tprev], xd, xci, λ), cfg)
+        return gyprev, gxd, gxci
     end
 
     # --- repeat for initialize function -----
-    fvjp_init(t, x, λ) = λ' * initialize(t[1], x, p)
+    fvjp_init(t, xd, xc1, λ) = λ' * initialize(t[1], xd, xc1, p)
 
-    input_init = (gt, gx, gλ)
+    input_init = (gt, gxd, gxci, gλ)
     cfg_init = ReverseDiff.GradientConfig(input_init)
 
-    vjp_init = (t, x, λ) -> begin
-        ReverseDiff.gradient!((gt, gx, gλ), fvjp_init, ([t], x, λ), cfg_init)
-        return gx
+    vjp_init = (t1, xd, xc1, λ) -> begin
+        ReverseDiff.gradient!((gt, gxd, gxci, gλ), fvjp_init, ([t1], xd, xc1, λ), cfg_init)
+        return gxd, gxci
     end
     # --------------
 
@@ -180,16 +160,16 @@ function explicit_unsteady_cache(initialize, perform_step, x, p=(); compile=fals
     if compile
         tape = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp, input, cfg))
 
-        vjp_step = (yprev, t, tprev, x, λ) -> begin
-            ReverseDiff.gradient!((gyprev, gt, gtprev, gx, gλ), tape, (yprev, [t], [tprev], x, λ))
-            return gyprev, gx
+        vjp_step = (yprev, t, tprev, xd, xci, λ) -> begin
+            ReverseDiff.gradient!((gyprev, gt, gtprev, gxd, gxci, gλ), tape, (yprev, [t], [tprev], xd, xci, λ))
+            return gyprev, gxd, gxci
         end
 
         tape_init = ReverseDiff.compile(ReverseDiff.GradientTape(fvjp_init, input_init, cfg_init))
 
-        vjp_init = (t, x, λ) -> begin
-            ReverseDiff.gradient!((gt, gx, gλ), tape_init, ([t], x, λ))
-            return gx
+        vjp_init = (t1, xd, xc1, λ) -> begin
+            ReverseDiff.gradient!((gt, gxd, gxci, gλ), tape_init, ([t1], xd, xc1, λ))
+            return gxd, gxci
         end
     end
     # --------------
@@ -198,65 +178,66 @@ function explicit_unsteady_cache(initialize, perform_step, x, p=(); compile=fals
 end
 
 # Provide a ChainRule rule for reverse mode
-function ChainRulesCore.rrule(::typeof(_explicit_unsteady_reverse), solve, initialize, perform_step, x, p, cache)
+function ChainRulesCore.rrule(::typeof(_explicit_unsteady), initialize, onestep!, t, xd, xc, p, cache)
 
     # evaluate solver
-    yv, tv = solve(x, p)
+    yv = odesolve(initialize, onestep!, t, xd, xc, p)
 
     # get solution dimensions
     ny, nt = size(yv)
 
-    # # create local copy of the output to guard against values getting overwritten
-    # yv = copy(yv)
-    # tv = copy(tv)
-
     # unpack cache
     if isnothing(cache)
-        cache = explicit_unsteady_cache(initialize, perform_step, x, p, compile=false)
+        cache = explicit_unsteady_cache(initialize, onestep!, ny, xd, xc, p, compile=false)
     end
     vjp_step, vjp_init = cache
 
-    function explicit_unsteady_pullback(ytbar)
-
-        # separate inputs
-        @views ybar = ytbar[1:end-1, :]
+    function explicit_unsteady_pullback(ybar)
 
         # initialize outputs
-        xbar = zeros(length(x))
+        xdbar = zeros(length(xd))
+        xcbar = zeros(size(xc))
 
         if nt > 1
 
             # --- Additional Time Steps --- #
             for i = nt:-1:2
                 @views λ = ybar[:, i]
-                @views Δybar, Δxbar = vjp_step(yv[:, i-1], tv[i], tv[i-1], x, λ)
-                xbar .+= Δxbar
+                @views Δybar, Δxdbar, Δxcibar = vjp_step(yv[:, i-1], t[i], t[i-1], xd, xc[:, i], λ)
+                xdbar .+= Δxdbar
+                @views xcbar[:, i] .= Δxcibar
                 @views ybar[:, i-1] .+= Δybar
             end
 
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
-            Δxbar = vjp_init(tv[1], x, λ)
-            xbar .+= Δxbar
+            Δxdbar, Δxcibar = vjp_init(t[1], xd, xc[:, 1], λ)
+            xdbar .+= Δxdbar
+            @views xcbar[:, 1] .= Δxcibar
 
         else
 
             # --- Initial Time Step --- #
             @views λ = ybar[:, 1]
-            Δxbar = vjp_init(tv[1], x, λ)
-            xbar .+= Δxbar
+            Δxdbar, Δxcibar = vjp_init(t[1], xd, xc[:, 1], λ)
+            xdbar .+= Δxdbar
+            @views xcbar[:, 1] .= Δxcibar
 
         end
 
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), xbar, NoTangent(), NoTangent()
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), xdbar, xcbar, NoTangent(), NoTangent()
     end
 
-    return [yv; tv'], explicit_unsteady_pullback
+    return yv, explicit_unsteady_pullback
 end
 
+
 # register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules _explicit_unsteady_reverse(solve, initialize, perform_step!, x::TrackedArray, p, cache)
-ReverseDiff.@grad_from_chainrules _explicit_unsteady_reverse(solve, initialize, perform_step!, x::AbstractVector{<:TrackedReal}, p, cache)
+ReverseDiff.@grad_from_chainrules _explicit_unsteady(initialize, onestep!, t, xd::Union{ReverseDiff.TrackedArray, AbstractVector{<:ReverseDiff.TrackedReal}}, xc::Union{ReverseDiff.TrackedArray, AbstractVector{<:ReverseDiff.TrackedReal}}, p, cache)
+ReverseDiff.@grad_from_chainrules _explicit_unsteady(initialize, onestep!, t, xd::Union{ReverseDiff.TrackedArray, AbstractVector{<:ReverseDiff.TrackedReal}}, xc, p, cache)
+ReverseDiff.@grad_from_chainrules _explicit_unsteady(initialize, onestep!, t, xd, xc::Union{ReverseDiff.TrackedArray, AbstractVector{<:ReverseDiff.TrackedReal}}, p, cache)
+
+
 
 # ------ Overloads for implicit_unsteady ----------
 

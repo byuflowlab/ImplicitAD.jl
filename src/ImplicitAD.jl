@@ -10,7 +10,7 @@ include("internals.jl")
 export implicit
 include("nonlinear.jl")
 
-export explicit_unsteady, implicit_unsteady, explicit_unsteady_cache
+export explicit_unsteady, implicit_unsteady, explicit_unsteady_cache, implicit_unsteady_cache
 include("unsteady.jl")
 
 export implicit_linear, apply_factorization

@@ -105,16 +105,13 @@ function explicit_unsteady_cache(initialize, onestep, ny, nxd, nxc, p=(); compil
     # convert to inplace
     onestep! = _make_onestep_inplace(onestep)
 
-    # copy p for compilation
-    pcopy = deepcopy(p)
-
     # allocate y variable for one time step
     T = eltype(ReverseDiff.track([1.0]))  # TODO: is this always the same?
     yone = Vector{T}(undef, ny)
 
     # vector jacobian product
     function fvjp(yprev, t, tprev, xd, xci, λ)
-        onestep!(yone, yprev, t[1], tprev[1], xd, xci, pcopy)
+        onestep!(yone, yprev, t[1], tprev[1], xd, xci, p)
         return λ' * yone
     end
 

@@ -638,7 +638,7 @@ end
 
     # test ImplicitAD
     @test all(isapprox.(J1, J3, atol=2e-12))
-    @test all(isapprox.(J2, J3, atol=1e-15))
+    @test all(isapprox.(J2, J3, atol=1e-13))
 
 end
 

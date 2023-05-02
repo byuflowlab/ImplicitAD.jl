@@ -670,7 +670,7 @@ end
         xd = [0.04, 1e4, 3e7, 1.0]
         xc = Matrix{Float64}(undef, 0, 100)
         p = ()
-        t = range(1e-6, 1e5, 100)
+        t = range(1e-6, 1e5, length=100)
 
         ny = 3
         nxd = 4
@@ -729,7 +729,7 @@ end
         xd = [0.04, 1e4, 3e7, 1.0]
         xc = Matrix{Float64}(undef, 0, 100)
         p = ()
-        t = range(1e-6, 1e5, 100)
+        t = range(1e-6, 1e5, length=100)
 
         ny = 3
         nxd = 4

@@ -635,10 +635,8 @@ end
     # compute reverse-mode sensitivities using ImplicitAD
     J3 = ReverseDiff.jacobian(modprogram, xc)
 
-
     # test ImplicitAD
     @test all(isapprox.(J1, J3, atol=2e-12))
-    println(J2 .- J3)
     @test all(isapprox.(J2, J3, atol=2e-12))
 
 end

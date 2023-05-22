@@ -747,13 +747,16 @@ end
 
         J1 = ForwardDiff.jacobian(program, xd)
 
+        J2 = ForwardDiff.jacobian(modprogram, xd)
+
         J3 = ReverseDiff.jacobian(modprogram, xd)
 
-        return J1, J3
+        return J1, J2, J3
     end
 
-    J1, J3 = runit()
+    J1, J2, J3 = runit()
 
+    @test all(isapprox.(J1, J2, atol=5e-10))
     @test all(isapprox.(J1, J3, atol=5e-10))
 
 end

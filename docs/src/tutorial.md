@@ -30,9 +30,9 @@ end
 ```
 Note that the only new piece of information we need to expose is the residual function so that partial derivatives can be computed.  The new function is now compatible with ForwardDiff or ReverseDiff, for any solver, and efficiently provides the correct derivatives without differentiating inside the solver.
 
-The residuals can either be returned: 
-`r = residual(y, x, p)` 
-or modified in place: 
+The residuals can either be returned:
+`r = residual(y, x, p)`
+or modified in place:
 `residual!(r, y, x, p)`.
 
 The input x should be a vector, and p is a tuple of fixed parameters.  The state and corresponding residuals, y and r, can be vectors or scalars (for 1D residuals).  The subfunctions are overloaded to handle both cases efficiently.
@@ -105,7 +105,7 @@ println("max abs difference = ", maximum(abs.(J1 - J2)))
 
 If the user can provide (or lazily compute) their own partial derivatives for ∂r/∂y then they can provide their own subfunction:
 `∂r∂y = drdy(residual, y, x, p)` (where `r = residual(y, x, p)`).  The default implementation computes these partials with ForwardDiff. Additionally the user can override the linear solve:
-`x = lsolve(A, b)`.  The default is the backslash operator.  
+`x = lsolve(A, b)`.  The default is the backslash operator.
 
 Some examples where one may wish to override these behaviors are for cases with significant sparsity (e.g., using SparseDiffTools), to preallocate the Jacobian, to provide a specific matrix factorization, or if the number of states is large overriding both methods will often be beneficial so that you can use iterative linear solvers (matrix-free Krylov methods) and thus provide efficient Jacobian vector products rather than a Jacobian.
 
@@ -146,7 +146,7 @@ println(maximum(abs.(J1 - J3)))
 
 ## Linear residuals
 
-If the residuals are linear (i.e., Ay = b) we could still use the above nonlinear formulation but it will be inefficient or require more work from the user.  Instead, we can provide the partial derivatives analytically for the user.  In this case, the user need only provide the inputs A and b.  
+If the residuals are linear (i.e., Ay = b) we could still use the above nonlinear formulation but it will be inefficient or require more work from the user.  Instead, we can provide the partial derivatives analytically for the user.  In this case, the user need only provide the inputs A and b.
 
 Let's consider a simple example.
 
@@ -185,7 +185,7 @@ function modprogram(x)
 end
 
 x = [1.0; 2.0; 3.0; 4.0]
-    
+
 J1 = ForwardDiff.jacobian(modprogram, x)
 J2 = ReverseDiff.jacobian(modprogram, x)
 
@@ -193,7 +193,7 @@ println(J1)
 println(maximum(abs.(J1 - J2)))
 ```
 
-For `implicit_linear` there are two keywords for custom subfunctions: 
+For `implicit_linear` there are two keywords for custom subfunctions:
 
 1) `lsolve(A, b)`: same purpose as before: solve ``A x = b`` where the default is the backslash operator.
 2) `fact(A)`: provide a matrix factorization of ``A``, since two linear solves are performed (for the primal and dual values).  default is `factorize` defined in `LinearAlgebra`.
@@ -217,11 +217,11 @@ function eigsolve(A, B)
     λ = eigvals(A, B)
     V = eigvecs(A, B)
     U = eigvecs(A', B')
-    
+
     return λ, V, U
 end
 
-function test(x)  
+function test(x)
     A = [x[1] x[2]; x[3] x[4]]
     B = [x[5] x[6]; x[7] x[8]]
     λ = ImplicitAD.implicit_eigval(A, B, eigsolve)  # replaced from λ, _, _ = eigsolve(A, B)
@@ -239,15 +239,125 @@ println(maximum(abs.(J1 - J2)))
 
 ## Ordinary Differential Equations
 
-TODO.  For now see docstrings and unit tests.
+We start with an out-of-place function for simplicity.  And we'll start with explicit methods also for simplicity.  In this case, we need to pass in an ODE method with the following signature:
+
+`y = onestep(yprev, t, tprev, xd, xci, p)`
+
+!!! note
+
+    The underlying methodology works for multi-step methods, but the API is currently limited to one-step methods just because they are more common and the API is simpler.
+
+The function updates the state `y` given the previous state `yprev`, the current time `t`, the previous time `tprev`, the design variables `xd` (design variables are fixed in time but change across design iterations), the control variables (control variables change at each time step, and `xci` refers to the control variables at this time step), and parameters `p` (parameters are fixed in time and across design iterations).
+
+In this case we choose an explicit forward Euler method.  This is not generally an effective method, but is chosen just to keep the example brief. Again, any one-step method can be used.  The unit tests show a more complex example using a 5/4 Runge-Kutta method.
+
+```@example explicit
+using ImplicitAD
+using ReverseDiff
+
+function fwdeuler(odefun, yprev, t, tprev, xd, xci, p)
+
+    dt = t - tprev
+    y = yprev .+ dt*odefun(yprev, t, xd, xci, p)
+
+    return y
+end
+```
+
+Note that we've written it generically so that a user can pass in any ODE function with the signature: `odefun(yprev, t, xd, xci, p)`.  In our case, let's choose a simple set of of ODEs, the Lotka–Volterra equations.  We set the variables of the Lotka–Volterra equations as design variables, so there are no parameters and no control variables:
+
+```@example explicit
+function lotkavolterra(y, t, xd, xci, p)
+    return [xd[1]*y[1] - xd[2]*y[1]*y[2];
+        -xd[3]*y[2] + xd[4]*y[1]*y[2]]
+end
+```
+
+We can now combine the two to create our one-step method for this specific problem:
+
+```@example explicit
+onestep(yprev, t, tprev, xd, xci, p) = fwdeuler(lotkavolterra, yprev, t, tprev, xd, xci, p)
+```
+
+The package also expects an initialization function of the form: `y0 = initialize(t0, xd, xc0, p)`.  In our case, we just pass in a simple starting point:
+
+```@example explicit
+initialize(t0, xd, xc0, p) = [1.0, 1.0]
+```
+
+The remaining inputs are the time steps (we choose 10 seconds with a spacing of 0.1), design variables, control variables (a matrix of size number of control variables by number of time steps), and parameters (a tuple).
+
+```@example explicit
+t = range(0.0, 10.0, step=0.1)
+xd = [1.5, 1.0, 3.0, 1.0]
+xc = Matrix{Float64}(undef, 0, length(t))
+p = ()
+```
+
+Let's now put this into a program.  For simplicity, let's assume that this is our entire model, it just takes the design variables in as inputs, and the overall output is the sum of our states at the last time step. If we weren't using the features of this package, we would just now initialize, then iterate through each time step to update the states.  This is a simple function to write, but there is a built-in function called `odesolve` so we'll just use it.
+
+```@example explicit
+function program(x)
+    y = ImplicitAD.odesolve(initialize, onestep, t, x, xc, p)
+    return sum(y[:, end])
+end
+```
+
+However, this is not what we want.  We want to leverage the analytic propagation of derivatives between time steps so that we don't have to record a long tape with reverse mode AD.  In this case the function just requires a name change:
+
+```@example explicit
+function modprogram_nocache(x)
+    y = explicit_unsteady(initialize, onestep, t, x, xc, p)
+    return sum(y[:, end])
+end
+```
+
+However, to really benefit we should preallocate our array storage, and compile the reverse-mode tape.
+
+!!! warning
+
+    Compiling should only be done if there is no branching in your ODE (e.g., conditional statements).  Otherwise, the derivatives may not be correct since you will compile for a branch that you might not follow at a later evaluation.
+
+In this case we can safely compile the tape.
+```
+ny = 2  # number of states
+nxd = length(xd)  # number of design vars
+nxc = 0  # number of control variables
+cache = explicit_unsteady_cache(initialize, onestep, ny, nxd, nxc, p; compile=true)
+```
+
+We now revise the function to use this cache.
+
+```@example explicit
+function modprogram(x)
+    y = explicit_unsteady(initialize, onestep, t, x, xc, p; cache)
+    return sum(y[:, end])
+end
+```
+
+Finally, let's compute the gradients.  First, by creating a long time with the standard approach:
+
+```@example explicit
+g1 = ReverseDiff.gradient(program, xd)
+```
+
+Or by compiling across just one-time step (avoiding the memory penalties that occur for large problems) and analytically propagating between steps.
+
+```@example explicit
+g2 = ReverseDiff.gradient(modprogram, xd)
+```
+
+This problem is so small we won't see any real difference.  The paper linked in the README shows how these benefits become significant as the number of time steps increase.
+
+To be continued...
 
 ## Custom Rules
 
-Consider now explicit (or potentially implicit) functions of the form: `y = func(x, p)` where `x` are variables and `p` are fixed parameters.  For cases where `func` is not compatible with AD, or for cases where we have a more efficient rule, we will want to insert our own derivatives into the AD chain.  This functionality could also be used for mixed-mode AD.  For example, by wrapping some large section of code in a function that we reply reverse mode AD on, then using that as a custom rule for the overall code that might be operating in forward mode.  More complex nestings are of course possible.  
+Consider now explicit (or potentially implicit) functions of the form: `y = func(x, p)` where `x` are variables and `p` are fixed parameters.  For cases where `func` is not compatible with AD, or for cases where we have a more efficient rule, we will want to insert our own derivatives into the AD chain.  This functionality could also be used for mixed-mode AD.  For example, by wrapping some large section of code in a function that we reply reverse mode AD on, then using that as a custom rule for the overall code that might be operating in forward mode.  More complex nestings are of course possible.
 
 One common use case for a custom rule is when an external function call is needed, i.e., a function from another programming language is used within a larger Julia code.
 
-We provide five options for injecting the derivatives of `func`.  You can provide the Jacobian `J = dy/dx`, or the JVPs/VJPs ``J v `` and ``v^T J``.  Alternatively, you can allow the package to estimate the derivatives using forward finite differencing, central finite differencing, or complex step.  In forward operation (with the finite differencing options) the package will choose between computing the Jacobian first or computing JVPs directly in order to minimize the number of calls to `func`.  
+We provide five options for injecting the derivatives of `func`.  You can provide the Jacobian `J = dy/dx`, or the JVPs/VJPs ``J v `` and ``v^T J``.  Alternatively, you can allow the package to estimate the derivatives using forward finite differencing, central finite differencing, or complex step.  In forward operation (with the finite differencing options) the package will choose between computing the Jacobian first or computing JVPs directly in order to minimize the number of calls to `func`.
 
 Below is a simple example.  Let's first create a function, we call external, meant to represent a function that we cannot pass AD through (but of course can in this simple example).
 
@@ -302,7 +412,7 @@ using ForwardDiff
 using ReverseDiff
 
 x = [1.0; 2.0; 3.0]
-Jtrue = ForwardDiff.jacobian(program, x) 
+Jtrue = ForwardDiff.jacobian(program, x)
 J1 = ForwardDiff.jacobian(modprogram, x)
 J2 = ReverseDiff.jacobian(modprogram, x)
 

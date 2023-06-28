@@ -239,6 +239,8 @@ println(maximum(abs.(J1 - J2)))
 
 ## Ordinary Differential Equations
 
+### Explicit ODE
+
 We start with an out-of-place function for simplicity.  And we'll start with explicit methods also for simplicity.  In this case, we need to pass in an ODE method with the following signature:
 
 `y = onestep(yprev, t, tprev, xd, xci, p)`
@@ -262,6 +264,7 @@ function fwdeuler(odefun, yprev, t, tprev, xd, xci, p)
 
     return y
 end
+nothing # hide
 ```
 
 Note that we've written it generically so that a user can pass in any ODE function with the signature: `odefun(yprev, t, xd, xci, p)`.  In our case, let's choose a simple set of of ODEs, the Lotka–Volterra equations.  We set the variables of the Lotka–Volterra equations as design variables, so there are no parameters and no control variables:
@@ -271,18 +274,21 @@ function lotkavolterra(y, t, xd, xci, p)
     return [xd[1]*y[1] - xd[2]*y[1]*y[2];
         -xd[3]*y[2] + xd[4]*y[1]*y[2]]
 end
+nothing # hide
 ```
 
 We can now combine the two to create our one-step method for this specific problem:
 
 ```@example explicit
 onestep(yprev, t, tprev, xd, xci, p) = fwdeuler(lotkavolterra, yprev, t, tprev, xd, xci, p)
+nothing # hide
 ```
 
 The package also expects an initialization function of the form: `y0 = initialize(t0, xd, xc0, p)`.  In our case, we just pass in a simple starting point:
 
 ```@example explicit
 initialize(t0, xd, xc0, p) = [1.0, 1.0]
+nothing # hide
 ```
 
 The remaining inputs are the time steps (we choose 10 seconds with a spacing of 0.1), design variables, control variables (a matrix of size number of control variables by number of time steps), and parameters (a tuple).
@@ -292,6 +298,7 @@ t = range(0.0, 10.0, step=0.1)
 xd = [1.5, 1.0, 3.0, 1.0]
 xc = Matrix{Float64}(undef, 0, length(t))
 p = ()
+nothing # hide
 ```
 
 Let's now put this into a program.  For simplicity, let's assume that this is our entire model, it just takes the design variables in as inputs, and the overall output is the sum of our states at the last time step. If we weren't using the features of this package, we would just now initialize, then iterate through each time step to update the states.  This is a simple function to write, but there is a built-in function called `odesolve` so we'll just use it.
@@ -301,6 +308,7 @@ function program(x)
     y = ImplicitAD.odesolve(initialize, onestep, t, x, xc, p)
     return sum(y[:, end])
 end
+nothing # hide
 ```
 
 However, this is not what we want.  We want to leverage the analytic propagation of derivatives between time steps so that we don't have to record a long tape with reverse mode AD.  In this case the function just requires a name change:
@@ -310,6 +318,7 @@ function modprogram_nocache(x)
     y = explicit_unsteady(initialize, onestep, t, x, xc, p)
     return sum(y[:, end])
 end
+nothing # hide
 ```
 
 However, to really benefit we should preallocate our array storage, and compile the reverse-mode tape.
@@ -324,6 +333,7 @@ ny = 2  # number of states
 nxd = length(xd)  # number of design vars
 nxc = 0  # number of control variables
 cache = explicit_unsteady_cache(initialize, onestep, ny, nxd, nxc, p; compile=true)
+nothing # hide
 ```
 
 We now revise the function to use this cache.
@@ -333,9 +343,10 @@ function modprogram(x)
     y = explicit_unsteady(initialize, onestep, t, x, xc, p; cache)
     return sum(y[:, end])
 end
+nothing # hide
 ```
 
-Finally, let's compute the gradients.  First, by creating a long time with the standard approach:
+Finally, let's compute the gradients.  First, by creating a long time with the standard approach (note that in this simple example we don't spend the effort compile this tape and preallocate the storage, but in the benchmarks shown in the paper we do this):
 
 ```@example explicit
 g1 = ReverseDiff.gradient(program, xd)
@@ -349,7 +360,96 @@ g2 = ReverseDiff.gradient(modprogram, xd)
 
 This problem is so small we won't see any real difference.  The paper linked in the README shows how these benefits become significant as the number of time steps increase.
 
-To be continued...
+This can also be done with in-place functions.  This often requires a little more care on types, depending on the one-step method used.  The unit tests show more extensive examples, and we'll do an in-place example with implicit ODEs next.
+
+### Implicit ODE
+
+Let's now try an implicit ODE time stepping method.  Here we expect to see more benefit because we can take advantage of the shorter time compilation as in the explicit case, but we can also take advantage of adjoints applied to the solves at each time step.  We'll do this one in-place although again both out-of-place and in-place forms are accepted.
+
+Since we're moving in-place the one step method looks like: `onestep!(y, yprev, t, tprev, xd, xci, p)`.  All inputs are the same as before except we update `y` in place.
+
+The only new piece of information we need for implicit methods, is like the nonlinear solver case, we need to provide the residual at a given time step.  For this example, we'll solve the Robertson function that is defined as follows, written in residual form.
+
+```@example implicit
+using ImplicitAD
+using ReverseDiff
+using NLsolve
+
+function robertson(r, dy, y, t, xd, xci, p)
+    r[1] = -xd[1]*y[1]               + xd[2]*y[2]*y[3] - dy[1]
+    r[2] = xd[1]*y[1] - xd[3]*y[2]^2 - xd[2]*y[2]*y[3] - dy[2]
+    r[3] = y[1] + y[2] + y[3] - xd[4]
+end
+nothing # hide
+```
+
+To update each state we use an implicit Euler method for simplicity:
+
+```@example implicit
+residual!(r, y, yprev, t, tprev, xd, xci, p) = robertson(r, (y .- yprev)/(t - tprev), y, t, xd, xci, p)
+nothing # hide
+```
+
+To solve these sets of residuals, we use the default trust-region method in NLsolve as our solver.  This now provides the expected form of our one-step update.  Note that it looks just like the explicit case since the solver occurs inside.
+
+```@example implicit
+function onestep!(y, yprev, t, tprev, xd, xci, p)
+    f!(r, yt) = residual!(r, yt, yprev, t, tprev, xd, xci, p)
+    sol = nlsolve(f!, yprev, autodiff=:forward, ftol=1e-12)
+    y .= sol.zero
+    return nothing
+end
+nothing # hide
+```
+
+We again need an initialization function and to set the time steps, design variables, control variables, and parameters:
+```@example implicit
+function initialize(t0, xd, xc0, p)
+    y0 = [1.0, 0.0, 0.0]
+    return y0
+end
+
+t = range(1e-6, 1e5, length=100)
+xd = [0.04, 1e4, 3e7, 1.0]
+xc = Matrix{Float64}(undef, 0, 100)
+p = ()
+nothing # hide
+```
+
+We again need to set the cache, but notice that it requires passing in the residual function with the signature: `residual!(r, y, yprev, t, tprev, xd, xci, p)`
+
+```@example implicit
+ny = 3
+nxd = 4
+nxc = 0
+cache = ImplicitAD.implicit_unsteady_cache(initialize, residual!, ny, nxd, nxc, p; compile=true)
+nothing # hide
+```
+
+Our program will return all the states at the last time step.  Again, we start with the canonical case where we don't use adjoints, and record the tape across the entire time series.
+```@example implicit
+function program(x)
+    y = ImplicitAD.odesolve(initialize, onestep!, t, x, xc, p)
+    return y[:, end]
+end
+nothing # hide
+```
+
+The modified version, just requires the residual as the new piece of information to do the adjoint.
+
+```@example implicit
+function modprogram(x)
+    y = implicit_unsteady(initialize, onestep!, residual!, t, x, xc, p; cache)
+    return y[:, end]
+end
+nothing # hide
+```
+
+Finally, we compute the Jacobian. The original one is actually not compatible with ReverseDiff because of the internals of NLSolve.  Fortunately, the adjoint doesn't need to propagate in the internals so we use our modified version.
+
+```@example implicit
+J = ReverseDiff.jacobian(modprogram, xd)
+```
 
 ## Custom Rules
 

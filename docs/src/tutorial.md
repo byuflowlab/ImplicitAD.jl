@@ -239,17 +239,31 @@ println(maximum(abs.(J1 - J2)))
 
 ## Ordinary Differential Equations
 
-### Explicit ODE
+This package supports both explicit and implicit ODEs. For explicit ODEs only the reverse case is overloaded: it compiles a tape for a single time step, then reuses that tape at each subsequent time step while analytically propagating derivatives between time steps.  The precomputation and reuse of the tape can significantly reduce memory and improve speed as compared to recording the tape over the whole time series, particularly as the tape gets longer.  Forward mode is not overloaded, it just does regular forward mode AD through the whole time series, since there is nothing to exploit in an explicit case.
 
-We start with an out-of-place function for simplicity.  And we'll start with explicit methods also for simplicity.  In this case, we need to pass in an ODE method with the following signature:
+For implicit ODEs both reverse and forward mode are overloaded.  Reverse mode takes advantage of the same reduced tape size.  Additionally, both forward and reverse mode use implicit differentiation (direct or adjoint) for the solve that occurs at each time step.
+
+Currently, we only support one-step methods. The underlying methodology works for multi-step methods, it is only the function signature that is currently limited to one-step.  This choice was made, at least for now, just to keep the API simple while covering the vast majority of uses cases.
+
+Both out-of-place and in-place functions are supported.  For both ODE types, an out-of-place time step has the signature:
 
 `y = onestep(yprev, t, tprev, xd, xci, p)`
 
-!!! note
+whereas in-place looks like:
 
-    The underlying methodology works for multi-step methods, but the API is currently limited to one-step methods just because they are more common and the API is simpler.
+`onestep!(y, yprev, t, tprev, xd, xci, p)`
 
-The function updates the state `y` given the previous state `yprev`, the current time `t`, the previous time `tprev`, the design variables `xd` (design variables are fixed in time but change across design iterations), the control variables (control variables change at each time step, and `xci` refers to the control variables at this time step), and parameters `p` (parameters are fixed in time and across design iterations).
+These functions update the state `y` given:
+- `yprev`: the previous state
+- `t`: the current time
+- `tprev`: the previous time
+- `xd`: design variables. design variables are fixed in time but change across design iterations.
+- `xci`: control variables. control variables change at each time step (and likely across design iterations), and `xci` refers to the control variables at this time step.
+- `p`: parameters. parameters are fixed in time and across design iterations.
+
+### Explicit ODEs
+
+We start with an explicit ODE, and use an out-of-place function for simplicity.  Recall that we need to pass in an ODE method with the following signature: `y = onestep(yprev, t, tprev, xd, xci, p)`
 
 In this case we choose an explicit forward Euler method.  This is not generally an effective method, but is chosen just to keep the example brief. Again, any one-step method can be used.  The unit tests show a more complex example using a 5/4 Runge-Kutta method.
 
@@ -267,7 +281,7 @@ end
 nothing # hide
 ```
 
-Note that we've written it generically so that a user can pass in any ODE function with the signature: `odefun(yprev, t, xd, xci, p)`.  In our case, let's choose a simple set of of ODEs, the Lotka–Volterra equations.  We set the variables of the Lotka–Volterra equations as design variables, so there are no parameters and no control variables:
+Note that we've written it generically so that a user can pass in any ODE function with the signature: `odefun(yprev, t, xd, xci, p)`.  In our case, let's choose a simple set of ODEs, the Lotka–Volterra equations.  We set the variables of the Lotka–Volterra equations as design variables, so there are no parameters and no control variables:
 
 ```@example explicit
 function lotkavolterra(y, t, xd, xci, p)
@@ -311,7 +325,7 @@ end
 nothing # hide
 ```
 
-However, this is not what we want.  We want to leverage the analytic propagation of derivatives between time steps so that we don't have to record a long tape with reverse mode AD.  In this case the function just requires a name change:
+However, this is not what we want.  We want to reuse the tape across time steps and analyticly propagate of derivatives between time steps, so that we don't have to record a long tape with reverse mode AD.  In this case the function just requires a name change `explicit_unsteady`:
 
 ```@example explicit
 function modprogram_nocache(x)
@@ -346,7 +360,7 @@ end
 nothing # hide
 ```
 
-Finally, let's compute the gradients.  First, by creating a long time with the standard approach (note that in this simple example we don't spend the effort compile this tape and preallocate the storage, but in the benchmarks shown in the paper we do this):
+Finally, let's compute the gradients.  First, by creating a long tape with the standard approach (note that in this simple example we don't spend the effort compile this tape and preallocate the storage, but in the benchmarks shown in the paper we do this):
 
 ```@example explicit
 g1 = ReverseDiff.gradient(program, xd)
@@ -358,17 +372,22 @@ Or by compiling across just one-time step (avoiding the memory penalties that oc
 g2 = ReverseDiff.gradient(modprogram, xd)
 ```
 
-This problem is so small we won't see any real difference.  The paper linked in the README shows how these benefits become significant as the number of time steps increase.
+We can see that these give the same results.
+```@example explicit
+println(g1 - g2)
+```
+
+This problem is so small we won't see any real time difference.  The paper linked in the README shows how these benefits become significant as the number of time steps increase.
 
 This can also be done with in-place functions.  This often requires a little more care on types, depending on the one-step method used.  The unit tests show more extensive examples, and we'll do an in-place example with implicit ODEs next.
 
-### Implicit ODE
+### Implicit ODEs
 
-Let's now try an implicit ODE time stepping method.  Here we expect to see more benefit because we can take advantage of the shorter time compilation as in the explicit case, but we can also take advantage of adjoints applied to the solves at each time step.  We'll do this one in-place although again both out-of-place and in-place forms are accepted.
+Let's now try an implicit ODE time stepping method.  Here we expect to see more benefit because we can take advantage of the shorter tape compilation as in the explicit case, but we can also take advantage of adjoints applied to the solves at each time step.  We'll do this one in-place although again both out-of-place and in-place forms are accepted.
 
-Since we're moving in-place the one step method looks like: `onestep!(y, yprev, t, tprev, xd, xci, p)`.  All inputs are the same as before except we update `y` in place.
+Recall that the signature for in-place is: `onestep!(y, yprev, t, tprev, xd, xci, p)`.
 
-The only new piece of information we need for implicit methods, is like the nonlinear solver case, we need to provide the residual at a given time step.  For this example, we'll solve the Robertson function that is defined as follows, written in residual form.
+The only new piece of information we need for implicit methods is, like the nonlinear solver case, the residual at a given time step.  For this example, we'll solve the Robertson function that is defined as follows, written in residual form.
 
 ```@example implicit
 using ImplicitAD
@@ -435,7 +454,7 @@ end
 nothing # hide
 ```
 
-The modified version, just requires the residual as the new piece of information to do the adjoint.
+The modified version only requires one new piece of information, the residuals, so that we can perform the adjoint.
 
 ```@example implicit
 function modprogram(x)
@@ -445,7 +464,7 @@ end
 nothing # hide
 ```
 
-Finally, we compute the Jacobian. The original one is actually not compatible with ReverseDiff because of the internals of NLSolve.  Fortunately, the adjoint doesn't need to propagate in the internals so we use our modified version.
+Finally, we compute the Jacobian. The original program is actually not compatible with ReverseDiff because of the internals of NLSolve.  Fortunately, the adjoint doesn't need to propagate through the solver so we use our modified version.
 
 ```@example implicit
 J = ReverseDiff.jacobian(modprogram, xd)

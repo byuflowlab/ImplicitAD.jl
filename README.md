@@ -29,7 +29,7 @@ As a side benefit the above functionality easily allows one to define custom AD 
 
 - Start with the tutorial to learn usage.
 - The API is described in the reference page.
-- The math is particularly helpful for those wanting to provide their own custom subfunctions. See the theory and also some scaling examples in this [PDF](https://arxiv.org/pdf/2306.15243.pdf).  A supplementary document deriving the linear and eigenvalue cases is available in this [PDF]().
+- The theory and also some scaling examples in this [paper](https://arxiv.org/pdf/2306.15243.pdf).  A supplementary document deriving the linear and eigenvalue cases is available in the [theory](theory.md) section.
 
 **Run Unit Tests**:
 

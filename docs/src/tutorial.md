@@ -342,7 +342,7 @@ However, to really benefit we should preallocate our array storage, and compile 
     Compiling should only be done if there is no branching in your ODE (e.g., conditional statements).  Otherwise, the derivatives may not be correct since you will compile for a branch that you might not follow at a later evaluation.
 
 In this case we can safely compile the tape.
-```
+```@example explicit
 ny = 2  # number of states
 nxd = length(xd)  # number of design vars
 nxc = 0  # number of control variables
@@ -469,6 +469,8 @@ Finally, we compute the Jacobian. The original program is actually not compatibl
 ```@example implicit
 J = ReverseDiff.jacobian(modprogram, xd)
 ```
+
+These examples are complete but brief.  Longer examples are available in the unit tests (see `tests` folder) and in the cases from the paper (see `examples` folder).
 
 ## Custom Rules
 

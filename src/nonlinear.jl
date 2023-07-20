@@ -117,5 +117,5 @@ end
 
 
 # register above rule for ReverseDiff
-ReverseDiff.@grad_from_chainrules _implicit(solve, residual, x::TrackedArray, p, drdy, lsolve)
-ReverseDiff.@grad_from_chainrules _implicit(solve, residual, x::AbstractVector{<:TrackedReal}, p, drdy, lsolve)
+ReverseDiff.@grad_from_chainrules _implicit(solve, residual, x::ReverseDiff.TrackedArray, p, drdy, lsolve)
+ReverseDiff.@grad_from_chainrules _implicit(solve, residual, x::AbstractVector{<:ReverseDiff.TrackedReal}, p, drdy, lsolve)

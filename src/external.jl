@@ -196,5 +196,5 @@ function ChainRulesCore.rrule(::typeof(_provide_rule), func, x, p, mode, jacobia
     return y, pullback
 end
 
-ReverseDiff.@grad_from_chainrules _provide_rule(func, x::TrackedArray, p, mode, jacobian, jvp, vjp)
-ReverseDiff.@grad_from_chainrules _provide_rule(func, x::AbstractArray{<:TrackedReal}, p, mode, jacobian, jvp, vjp)
+ReverseDiff.@grad_from_chainrules _provide_rule(func, x::ReverseDiff.TrackedArray, p, mode, jacobian, jvp, vjp)
+ReverseDiff.@grad_from_chainrules _provide_rule(func, x::AbstractArray{<:ReverseDiff.TrackedReal}, p, mode, jacobian, jvp, vjp)

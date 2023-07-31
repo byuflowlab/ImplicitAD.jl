@@ -25,9 +25,9 @@ implicit_eigval(A, B::AbstractArray{<:ForwardDiff.Dual{T}}, eigsolve) where {T} 
 implicit_eigval(A::AbstractArray{<:ForwardDiff.Dual{T}}, B, eigsolve) where {T} = eigval_fwd(A, B, eigsolve)
 
 # reverse cases
-implicit_eigval(A::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, B::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, eigsolve) where {T} = eigval_rev(A, B, eigsolve)
-implicit_eigval(A, B::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, eigsolve) where {T} = eigval_rev(A, B, eigsolve)
-implicit_eigval(A::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, B, eigsolve) where {T} = eigval_rev(A, B, eigsolve)
+implicit_eigval(A::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, B::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, eigsolve) = eigval_rev(A, B, eigsolve)
+implicit_eigval(A, B::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, eigsolve) = eigval_rev(A, B, eigsolve)
+implicit_eigval(A::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, B, eigsolve) = eigval_rev(A, B, eigsolve)
 
 # extract values from A and B before passing to common function
 eigval_fwd(A, B, eigsolve) = eigval_deriv(A, B, ForwardDiff.value.(A), ForwardDiff.value.(B), eigsolve)

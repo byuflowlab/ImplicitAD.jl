@@ -20,9 +20,9 @@ Make eigenvalue problems AD compatible with ForwardDiff and ReverseDiff
 implicit_eigval(A, B, eigsolve) = eigsolve(A, B)[1]  # If no AD, just solve normally. Returns only eigenvalue.
 
 # forward cases
-implicit_eigval(A::AbstractArray{<:ForwardDiff.Dual{T}}, B::AbstractArray{<:ForwardDiff.Dual{T}}, eigsolve) where {T} = eigval_fwd(A, B, eigsolve)
-implicit_eigval(A, B::AbstractArray{<:ForwardDiff.Dual{T}}, eigsolve) where {T} = eigval_fwd(A, B, eigsolve)
-implicit_eigval(A::AbstractArray{<:ForwardDiff.Dual{T}}, B, eigsolve) where {T} = eigval_fwd(A, B, eigsolve)
+implicit_eigval(A::AbstractArray{<:ForwardDiff.Dual}, B::AbstractArray{<:ForwardDiff.Dual}, eigsolve) = eigval_fwd(A, B, eigsolve)
+implicit_eigval(A, B::AbstractArray{<:ForwardDiff.Dual}, eigsolve) = eigval_fwd(A, B, eigsolve)
+implicit_eigval(A::AbstractArray{<:ForwardDiff.Dual}, B, eigsolve) = eigval_fwd(A, B, eigsolve)
 
 # reverse cases
 implicit_eigval(A::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, B::Union{ReverseDiff.TrackedArray, AbstractArray{<:ReverseDiff.TrackedReal}}, eigsolve) = eigval_rev(A, B, eigsolve)

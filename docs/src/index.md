@@ -19,7 +19,7 @@ As a side benefit the above functionality easily allows one to define custom AD 
 - Version for ordinary differentiation equations (i.e., discrete unsteady adjoint)
 - Analytic overrides for linear systems (more efficient)
 - Analytic overrides for eigenvalue problems (more efficient)
-- Can provide custom rules to be inserted into the AD chain. Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).
+- Can provide custom rules to be inserted into the AD chain (e.g., interfacing with python).  Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).  But can also provide Jacobians or JVP/VJPs.
 
 **Documentation**:
 
@@ -36,8 +36,8 @@ pkg> test
 
 **Citing**:
 
-For now, please cite the following preprint.  DOI: [10.48550/arXiv.2306.15243](https://doi.org/10.48550/arXiv.2306.15243)
+Please cite the following preprint.  DOI: [10.48550/arXiv.2306.15243](https://doi.org/10.48550/arXiv.2306.15243)
 
 **Other Packages**:
 
-[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) are other prior implementations of the nonlinear portion of this package.  [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous unsteady adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/).
+[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) are other implementations of the nonlinear portion of this package.  [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous unsteady adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/).

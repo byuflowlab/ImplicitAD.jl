@@ -1,7 +1,7 @@
 # ImplicitAD.jl
 
-<!-- [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/stable/) -->
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/dev/)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/stable/)
+<!-- [![](https://img.shields.io/badge/docs-dev-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/dev/) -->
 [![Build Status](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 **Summary**: Automate steady and unsteady adjoints.
@@ -23,13 +23,13 @@ As a side benefit the above functionality easily allows one to define custom AD 
 - Version for ordinary differentiation equations (i.e., discrete unsteady adjoint)
 - Analytic overrides for linear systems (more efficient)
 - Analytic overrides for eigenvalue problems (more efficient)
-- Can provide custom rules to be inserted into the AD chain. Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).
+- Can provide custom rules to be inserted into the AD chain (e.g., interfacing with python).  Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).  But can also provide Jacobians or JVP/VJPs.
 
 **Documentation**:
 
-- Start with the tutorial to learn usage.
-- The API is described in the reference page.
-- The theory and also some scaling examples in this [paper](https://arxiv.org/pdf/2306.15243.pdf).  A supplementary document deriving the linear and eigenvalue cases is available in the [theory](theory.md) section.
+- Start with the [tutorial](tutorial.md) to learn usage.
+- The API is described in the [reference](reference.md) page.
+- The math is particularly helpful for those wanting to provide their own custom subfunctions. See the theory and also some scaling examples in this [PDF](https://arxiv.org/pdf/2306.15243.pdf).  A supplementary document deriving the linear and eigenvalue cases is available in the [theory](theory.md) section.
 
 **Run Unit Tests**:
 
@@ -40,8 +40,8 @@ pkg> test
 
 **Citing**:
 
-For now, please cite the following preprint.  DOI: [10.48550/arXiv.2306.15243](https://doi.org/10.48550/arXiv.2306.15243)
+Please cite the following preprint.  DOI: [10.48550/arXiv.2306.15243](https://doi.org/10.48550/arXiv.2306.15243)
 
 **Other Packages**:
 
-[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) are other prior implementations of the nonlinear portion of this package.  [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous unsteady adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/).
+[Nonconvex.jl](https://julianonconvex.github.io/Nonconvex.jl/stable/gradients/implicit/) and [ImplicitDifferentiation.jl](https://github.com/gdalle/ImplicitDifferentiation.jl) are other implementations of the nonlinear portion of this package.  [SciML](https://docs.sciml.ai/SciMLSensitivity/stable/manual/differential_equation_sensitivities/#sensitivity_diffeq) provides support for continuous unsteady adjoints of ODEs.  They have also recently added an implementation for the [nonlinear case](https://docs.sciml.ai/SciMLSensitivity/stable/manual/nonlinear_solve_sensitivities/).

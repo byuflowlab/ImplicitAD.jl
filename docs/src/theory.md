@@ -18,7 +18,7 @@ and we need ``\dot{y}``, the derivatives of ``y`` with respect to our inputs of 
 ```math
 \dot{y} = \dot{A}^{-1} b + A^{-1} \dot{b} \tag{2}
 ```
-We now need the derivative of a matix inverse, which we can find by considering its definition relative to an identity matrix:
+We now need the derivative of a matrix inverse, which we can find by considering its definition relative to an identity matrix:
 ```math
 A A^{-1} = I
 ```

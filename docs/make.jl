@@ -6,7 +6,6 @@ DocMeta.setdocmeta!(ImplicitAD, :DocTestSetup, :(using ImplicitAD); recursive=tr
 makedocs(;
     modules=[ImplicitAD],
     authors="Andrew Ning <aning@byu.edu> and contributors",
-    repo="https://github.com/byuflowlab/ImplicitAD.jl/blob/{commit}{path}#{line}",
     sitename="ImplicitAD.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",

@@ -1,7 +1,7 @@
 # ImplicitAD.jl
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/stable/)
 <!-- [![](https://img.shields.io/badge/docs-dev-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/dev/) -->
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://byuflowlab.github.io/ImplicitAD.jl/stable/)
 [![Build Status](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/byuflowlab/ImplicitAD.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 **Summary**: Automate steady and unsteady adjoints.

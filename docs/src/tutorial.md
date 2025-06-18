@@ -594,3 +594,7 @@ J2 = ReverseDiff.jacobian(modprogram, x)
 println(maximum(abs.(Jtrue - J1)))
 println(maximum(abs.(Jtrue - J2)))
 ```
+
+!!! note
+
+    In the examples folder, there is a longer example using provide_rule with Python (PyTorch), including using the AD capabilities of PyTorch to provide the Jacobian or JVP/VJPs for ImplicitAD to use.

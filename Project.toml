@@ -1,7 +1,7 @@
 name = "ImplicitAD"
 uuid = "e7cbb90b-9b31-4eb2-a8c8-45099c074ee1"
 authors = ["Andrew Ning <aning@byu.edu> and contributors"]
-version = "0.3.2"
+version = "1.0.0"
 
 [deps]
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"

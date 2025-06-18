@@ -19,7 +19,7 @@ makedocs(;
         "API" => "reference.md",
         "Theory" => "theory.md",
     ],
-    warnonly = Documenter.except(:missing_docs),
+    checkdocs=:exports,
 )
 
 deploydocs(;

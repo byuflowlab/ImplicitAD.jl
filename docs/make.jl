@@ -3,8 +3,6 @@ using Documenter
 
 DocMeta.setdocmeta!(ImplicitAD, :DocTestSetup, :(using ImplicitAD); recursive=true)
 
-Documenter.strict_mode!(Documenter.DEFAULT_STRICTNESS .- [:missing_docs])
-
 makedocs(;
     modules=[ImplicitAD],
     authors="Andrew Ning <aning@byu.edu> and contributors",
@@ -21,6 +19,7 @@ makedocs(;
         "API" => "reference.md",
         "Theory" => "theory.md",
     ],
+    warnonly = Documenter.except(:missing_docs),
 )
 
 deploydocs(;

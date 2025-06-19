@@ -25,4 +25,5 @@ makedocs(;
 deploydocs(;
     repo="github.com/byuflowlab/ImplicitAD.jl",
     devbranch="main",
+    versions = ["stable", "v#.#.#", "dev"]
 )

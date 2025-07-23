@@ -20,7 +20,7 @@ provide_rule(func, x, p=(); mode="ffd", jacobian=nothing, jvp=nothing, vjp=nothi
 
 _provide_rule(func, x, p, mode, jacobian, jvp, vjp) = func(x, p)
 
-function _provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, jacobian, jvp, vjp) where {T}
+function _provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p, mode, jacobian, jvp, vjp) where {T,V,N}
 
     # unpack dual
     xv, xdot = unpack_dual(x)
@@ -124,7 +124,7 @@ function _provide_rule(func, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, mode, 
         error("invalid mode")
     end
 
-    return pack_dual(yv, ydot, T)
+    return pack_dual(yv, ydot, T, Val(N))
 end
 
 

@@ -79,7 +79,7 @@ _implicit(solve, residual, x, p, drdy, lsolve) = solve(x, p)
 
 # Overloaded for ForwardDiff inputs, providing exact derivatives using
 # Jacobian vector product.
-function _implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p, drdy, lsolve) where {T}
+function _implicit(solve, residual::R, x::AbstractVector{<:ForwardDiff.Dual{T,V,N}}, p, drdy, lsolve) where {R,T,V,N}
 
     # evaluate solver
     xv = fd_value(x)
@@ -95,7 +95,7 @@ function _implicit(solve, residual, x::AbstractVector{<:ForwardDiff.Dual{T}}, p,
     ydot = lsolve(A, b)
 
     # repack in ForwardDiff Dual
-    return pack_dual(yv, ydot, T)
+    return pack_dual(yv, ydot, T, Val(N))
 end
 
 

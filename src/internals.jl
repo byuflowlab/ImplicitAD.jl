@@ -18,6 +18,20 @@ Create a ForwardDiff Dual with value yv, derivatives dy, and Dual type T
 pack_dual(yv::AbstractFloat, dy, T) = ForwardDiff.Dual{T}(yv, ForwardDiff.Partials(Tuple(dy)))
 pack_dual(yv::AbstractVector, dy, T) = ForwardDiff.Dual{T}.(yv, ForwardDiff.Partials.(Tuple.(eachrow(dy))))
 
+# type-stable versions, where the tuple size is inferrable
+
+function pack_dual(yv::AbstractFloat, dy, ::Type{T}, ::Val{N}) where {T,N}
+    dyt = NTuple{N}(dy)
+    dyp = ForwardDiff.Partials(dyt)
+    return ForwardDiff.Dual{T}(yv, dyp)
+end
+
+function pack_dual(yv::AbstractVector, dy, ::Type{T}, ::Val{N}) where {T,N}
+    dyt = NTuple{N}.(eachrow(dy))
+    dyp = ForwardDiff.Partials.(dyt)
+    return ForwardDiff.Dual{T}.(yv, dyp)
+end
+
 # -----------------------------------------
 
 """

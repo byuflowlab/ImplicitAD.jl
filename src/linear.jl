@@ -111,7 +111,7 @@ _implicit_linear(A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, mmul, Af) w
 # implicit_linear!(ydot, A::AbstractArray{<:ForwardDiff.Dual{T}}, b, lsolve, Af) where {T} = linear_dual!(ydot, A, b, lsolve, Af, T)
 
 # Both A and b contain duals
-function linear_dual(A, b, lsolve, mmul, Af, T)
+function linear_dual(A, b, lsolve, mmul, Af, ::Type{T}) where {T}
 
     # unpack dual numbers (if not dual numbers, since only one might be, just returns itself)
     bv = fd_value(b)
@@ -231,4 +231,3 @@ ReverseDiff.@grad_from_chainrules _implicit_linear(A::Union{ReverseDiff.TrackedA
 #     # reassign y to this value
 #     y .= pack_dual(yv, ydot, T)
 # end
-

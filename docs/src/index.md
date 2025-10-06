@@ -1,12 +1,12 @@
 # ImplicitAD Documentation
 
-**Summary**: Automate steady and unsteady adjoints.
+**Summary**: Automate steady and unsteady adjoints (and other handy tasks related to derivatives).
 
 Make implicit functions compatible with algorithmic differentiation (AD) without differentiating inside the solvers (discrete adjoint). Even though one can sometimes propagate AD through a solver, this is typically inefficient and less accurate.  Instead, one should use adjoints or direct (forward) methods. However, implementing adjoints is often cumbersome. This package allows for a one-line change to automate this process.  End-users can then use your package with AD normally, and utilize adjoints automatically.
 
 We've also enabled methods to efficiently compute derivatives through explicit and implicit ODE solvers (unsteady discrete adjoint).  For the implicit solve at each time step we can apply the same methodology.  However, both still face memory challenges for long time-based simulations.  We analytically propagate derivatives between time steps so that reverse mode AD tapes only need to extend across a single time step. This allows for arbitrarily long time sequences without increasing memory requirements.
 
-As a side benefit the above functionality easily allows one to define custom AD rules.  This is perhaps most useful when calling code from another language.  We provide fall backs for utilizing finite differencing and complex step efficiently if the external code cannot provide derivatives (ideally via Jacobian vector products).  This functionality can also be used for mixed-mode AD.
+As a side benefit the above functionality easily allows one to define custom AD rules.  This is perhaps most useful when calling code from another language.  We provide fall backs for utilizing finite differencing and complex step efficiently if the external code cannot provide derivatives (ideally via Jacobian vector products).  This functionality can also be used for mixed-mode AD.  There is also functionality to enable Julia derivatives to be easily incorporated into a Python program.
 
 **Author**: Andrew Ning and Taylor McDonnell
 
@@ -19,7 +19,8 @@ As a side benefit the above functionality easily allows one to define custom AD 
 - Version for ordinary differentiation equations (i.e., discrete unsteady adjoint)
 - Analytic overrides for linear systems (more efficient)
 - Analytic overrides for eigenvalue problems (more efficient)
-- Can provide custom rules to be inserted into the AD chain (e.g., interfacing with python).  Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).  But can also provide Jacobians or JVP/VJPs.
+- Can provide custom rules to be inserted into the AD chain (e.g., interfacing with Python).  Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).  But can also provide Jacobians or JVP/VJPs.
+- Also provides the opposite functionality where Julia AD can be used to provide derivatives in an outer Python program (e.g., OpenMDAO).
 
 **Documentation**:
 

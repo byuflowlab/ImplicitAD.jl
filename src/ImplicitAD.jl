@@ -5,6 +5,7 @@ using ReverseDiff
 using ChainRulesCore
 using LinearAlgebra: factorize, ldiv!, diag
 
+
 include("internals.jl")
 
 export implicit
@@ -19,7 +20,7 @@ include("linear.jl")
 export implicit_eigval
 include("eigenvalues.jl")
 
-export provide_rule
+export provide_rule, derivativesetup
 include("external.jl")
 
 

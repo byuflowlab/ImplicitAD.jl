@@ -472,7 +472,7 @@ J = ReverseDiff.jacobian(modprogram, xd)
 
 These examples are complete but brief.  Longer examples are available in the unit tests (see `tests` folder) and in the cases from the paper (see `examples` folder).
 
-## Custom Rules
+## Custom Rules (e.g., calling Python or other external code packages)
 
 Consider now explicit (or potentially implicit) functions of the form: `y = func(x, p)` where `x` are variables and `p` are fixed parameters.  For cases where `func` is not compatible with AD, or for cases where we have a more efficient rule, we will want to insert our own derivatives into the AD chain.  This functionality could also be used for mixed-mode AD.  For example, by wrapping some large section of code in a function that we reply reverse mode AD on, then using that as a custom rule for the overall code that might be operating in forward mode.  More complex nestings are of course possible.
 
@@ -598,3 +598,111 @@ println(maximum(abs.(Jtrue - J2)))
 !!! note
 
     In the examples folder, there is a longer example using provide_rule with Python (PyTorch), including using the AD capabilities of PyTorch to provide the Jacobian or JVP/VJPs for ImplicitAD to use.
+
+## Using Julia AD to Provide Derivatives in Python
+
+This is the opposite scenario where instead of calling functions in Python from Julia, we may want to use Julia as an AD tool for a top-level Python script.  In this example we'll first create a basic Julia function that we want to differentiate.  Note that it must have the signature `f = func(x, p)` where `x` is a vector that we want to differentiate with respect to, `p` are other input parameters (no differentiation), `f` is a vector of outputs that we differentiate.  The function can be as complex as we want, calling solvers, and using implicit differentiation or whatever.  But should be written to be Julia AD compatible.  Let's say the following function was in a file called 'actuator.jl'.
+
+```juila
+function actuatordisk(x, p)
+    a, A, rho, Vinf = x
+    q = 0.5 * rho * Vinf^2
+    CT = 4 * a * (1 - a)
+    CP = CT * (1 - a)
+    T = q * A * CT
+    P = q * A * CP * Vinf
+    return [T, P]
+end
+```
+
+We now want the derivatives in Python, so the below script is in Python.  Note that you must load PythonCall before ImplicitAD as the functionality shown here is designed as an optional [extension](https://pkgdocs.julialang.org/v1/creating-packages/#Conditional-loading-of-code-in-packages-(Extensions)) to ImplicitAD.  This just means that PythonCall is not a formal dependency of ImplicitAD so that people don't need to install it.  But if they do install PythonCall then this extension is loaded in ImplicitAD for extra functionality. There is a pure Julia fallback for this same functionality, but its use cases when calling from Julia would be pretty limited as you could just use the Julia AD packages normally.  We load the file actuator.jl, though in general you could use Julia packages and could potentially even write the entire Julia script on the Python side (using juliacall syntax for all functions).
+
+
+```python
+import numpy as np
+from juliacall import Main as jl
+
+jl.seval("using PythonCall")
+jl.seval("using ImplicitAD: derivativesetup")
+
+jl.include('actuator.jl')
+
+# x just needs to be representative of the size/type of x.
+x = np.array([0.3, 2000.0, 1.0, 8.0])
+# this should be the actual set of parameters we want to use
+p = ()
+# setup function to compute jacobian
+jacobian = jl.derivativesetup(jl.actuatordisk, x, p, "fjacobian")  # this last option means forward-mode Jacobian
+
+# we can now reuse this function as much as we want to compute Jacobian
+# the differentiation is happening on the Julia side
+J = np.zeros((2, len(x)))  # we initialize J so we can populate it in-place and save storage as we recompute Jacobian
+
+# compute Jacobian
+x = np.array([0.3, 2000.0, 1.0, 8.0])
+jacobian(J, x)
+print(J)
+
+# compute at some other point
+x = np.array([0.25, 1800.0, 1.1, 8.5])
+jacobian(J, x)
+print(J)
+```
+
+There are other options besides forward-mode Jacobian, include reverse-mode Jacobian, a Jacobian-vector product, and vector-Jacobian products.  The below example uses [OpenMDAO](https://openmdao.org), which can directly handle JVPs and VJPs.
+
+
+```python
+import numpy as np
+from juliacall import Main as jl
+import openmdao.api as om
+
+jl.seval("using PythonCall")
+jl.seval("using ImplicitAD: derivativesetup")
+
+
+class JuliaADWrapper(om.ExplicitComponent):
+
+    def __init__(self, func, x, nf, p):
+        super().__init__()
+        self.func = func
+        self.x = x
+        self.nf = nf
+        self.p = p
+
+    def setup(self):
+        self.add_input('x', self.x)
+        self.add_output('f', np.zeros(self.nf))
+
+        self.jvp = jl.derivativesetup(self.func, self.x, self.p, "jvp")
+        self.vjp = jl.derivativesetup(self.func, self.x, self.p, "vjp")
+
+    def compute(self, inputs, outputs):
+        outputs['f'] = self.func(inputs['x'], self.p)
+
+    def compute_jacvec_product(self, inputs, d_inputs, d_outputs, mode):
+        if mode == 'fwd':
+            self.jvp(d_outputs['f'], inputs['x'], d_inputs['x'])
+        elif mode == 'rev':
+            self.vjp(d_inputs['x'], inputs['x'], d_outputs['f'])
+
+
+if __name__ == "__main__":
+    jl.include('actuator.jl')
+    x = np.array([0.3, 2000.0, 1.0, 8.0])
+    p = ()
+
+    prob = om.Problem()
+    model = prob.model
+
+    nf = 2
+    p = ()
+    model.add_subsystem('comp', JuliaADWrapper(jl.actuatordisk, x, nf, p), promotes=['*'])
+    prob.setup()
+    model.comp.x = x
+    prob.run_model()
+    print(prob['f'])
+    # large abs error becuase derivatives are large (order 10^5) in this unscaled example
+    prob.check_partials(compact_print=True, abs_err_tol=1.0, rel_err_tol=1.0E-5)
+```
+

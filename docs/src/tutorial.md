@@ -603,7 +603,7 @@ println(maximum(abs.(Jtrue - J2)))
 
 This is the opposite scenario where instead of calling functions in Python from Julia, we may want to use Julia as an AD tool for a top-level Python script.  In this example we'll first create a basic Julia function that we want to differentiate.  Note that it must have the signature `f = func(x, p)` where `x` is a vector that we want to differentiate with respect to, `p` are other input parameters (no differentiation), `f` is a vector of outputs that we differentiate.  The function can be as complex as we want, calling solvers, and using implicit differentiation or whatever.  But should be written to be Julia AD compatible.  Let's say the following function was in a file called 'actuator.jl'.
 
-```juila
+```julia
 function actuatordisk(x, p)
     a, A, rho, Vinf = x
     q = 0.5 * rho * Vinf^2

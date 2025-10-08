@@ -1055,3 +1055,64 @@ end
     @test all(isapprox.(J1, Jfd, atol=1e-9))
 
 end
+
+
+# mainly for use via python, though we test in julia here just to make sure functionality is correct
+@testset "derivative setup" begin
+
+    function actuatordisk(a, A, rho, Vinf)
+        q = 0.5 * rho * Vinf^2
+        CT = 4 * a * (1 - a)
+        CP = CT * (1 - a)
+        T = q * A * CT
+        P = q * A * CP * Vinf
+        return T, P
+    end
+
+    actuatorwrapper(x, p) = collect(actuatordisk(x...))
+
+    x = [0.3, 1.0, 1.1, 8.0]
+    p = ()
+
+    # forward jacobian
+    jacobian = derivativesetup(actuatorwrapper, x, p, "fjacobian")
+
+    J = zeros(2, length(x))
+    jacobian(J, x)
+
+    # reverse jacobian
+    Jr = zeros(2, length(x))
+    rjacobian = derivativesetup(actuatorwrapper, x, p, "rjacobian")
+
+    rjacobian(Jr, x)
+
+    # check equality
+    @test all(isapprox.(J, Jr, rtol=1e-15))
+
+    # spot checks (analytic)
+    a = x[1]
+    T, P = actuatorwrapper(x, p)
+    @test isapprox(J[1, 1], T/(a*(1 - a))*(1 - 2*a), rtol=1e-15)  # dT/da
+    @test isapprox(J[2, 3], P/x[3], rtol=1e-15)  # dP/drho
+
+    # compiled reverse jacobian
+    Jrc = zeros(2, length(x))
+    rjacobiancomp = derivativesetup(actuatorwrapper, x, p, "rjacobian", true)
+
+    rjacobiancomp(Jrc, x)
+    @test all(isapprox.(Jr, Jrc, rtol=1e-15))
+
+    # jacobian vector product
+    jvp = derivativesetup(actuatorwrapper, x, p, "jvp")
+    xdot = ones(length(x))
+    fdot = zeros(2)
+    jvp(fdot, x, xdot)
+    @test all(isapprox.(fdot, J * xdot, rtol=1e-15))
+
+    vjp = derivativesetup(actuatorwrapper, x, p, "vjp")
+    xbar = zeros(length(x))
+    fbar = ones(2)
+    vjp(xbar, x, fbar)
+    @test all(isapprox.(xbar, J' * fbar, rtol=1e-15))
+
+end

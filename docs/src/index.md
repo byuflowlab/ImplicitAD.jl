@@ -21,6 +21,7 @@ As a side benefit the above functionality easily allows one to define custom AD 
 - Analytic overrides for eigenvalue problems (more efficient)
 - Can provide custom rules to be inserted into the AD chain (e.g., interfacing with Python).  Provides finite differencing and complex step defaults for cases where AD is not available (e.g., calling another language).  But can also provide Jacobians or JVP/VJPs.
 - Also provides the opposite functionality where Julia AD can be used to provide derivatives in an outer Python program (e.g., OpenMDAO).
+- For pure Python users, python/nonlinear.py contains the nonlinear solver functionality using Jax.
 
 **Documentation**:
 

@@ -37,14 +37,16 @@ or modified in place:
 
 The input x should be a vector, and p is a tuple of fixed parameters.  The state and corresponding residuals, y and r, can be vectors or scalars (for 1D residuals).  The subfunctions are overloaded to handle both cases efficiently.
 
-Limitation: ReverseDiff does not currently support compiling the tape for custome rules.  See this issue in ReverseDiff: <https://github.com/JuliaDiff/ReverseDiff.jl/issues/187>
+Limitation: ReverseDiff does not currently support compiling the tape for custom rules.  See this issue in ReverseDiff: <https://github.com/JuliaDiff/ReverseDiff.jl/issues/187>
 
 ## Basic Usage
 
 Let's go through a complete example now. Assume we have two nonlinear implicit equations:
 ```math
-r_1(x, y) = (y_1 + x_1) (y_2^3 - x_2) + x_3 = 0
+\begin{aligned}
+r_1(x, y) = (y_1 + x_1) (y_2^3 - x_2) + x_3 = 0\\
 r_2(x, y) = \sin(y_2 \exp(y_1) - 1) x_4 = 0
+\end{aligned}
 ```
 
 We will use the NLsolve package to solve these equations (refer to the first example in their documentation if not familiar with NLsolve).  We will also put explict operations before and after the solve just to show how this will work in the midst of a larger program.  In this case we use the in-place form of the residual function.
@@ -66,7 +68,8 @@ end
 function program(x)
     z = 2.0*x
     w = z + x.^2
-    y = solve(w)
+    p = ()
+    y = solve(w, p)
     return y[1] .+ w*y[2]
 end
 nothing # hide

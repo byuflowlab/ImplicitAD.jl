@@ -18,7 +18,7 @@ PyCallExt = "PythonCall"
 
 [compat]
 ChainRulesCore = "1.15"
-DifferentiationInterface = "0.6"
+DifferentiationInterface = "0.6, 0.7"
 ForwardDiff = "0.10.30, 1"
 PythonCall = "0.9.28"
 ReverseDiff = "1.14"

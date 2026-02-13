@@ -417,7 +417,7 @@ To solve these sets of residuals, we use the default trust-region method in NLso
 ```@example implicit
 function onestep!(y, yprev, t, tprev, xd, xci, p)
     f!(r, yt) = residual!(r, yt, yprev, t, tprev, xd, xci, p)
-    sol = nlsolve(f!, yprev, autodiff=:forward, ftol=1e-12)
+    sol = nlsolve(f!, Vector(yprev), autodiff=:forward, ftol=1e-12)
     y .= sol.zero
     return nothing
 end

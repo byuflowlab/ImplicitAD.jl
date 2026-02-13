@@ -719,7 +719,7 @@ end
 
     function onestep(yprev, t, tprev, xd, xci, p)
         f(yt) = residual(yt, yprev, t, tprev, xd, xci, p)
-        sol = nlsolve(f, yprev, autodiff=:forward, ftol=1e-12)
+        sol = nlsolve(f, Vector(yprev), autodiff=:forward, ftol=1e-12)
         return sol.zero
     end
 
@@ -777,7 +777,7 @@ end
 
     function onestep!(y, yprev, t, tprev, xd, xci, p)
         f!(r, yt) = residual!(r, yt, yprev, t, tprev, xd, xci, p)
-        sol = nlsolve(f!, yprev, autodiff=:forward, ftol=1e-12)
+        sol = nlsolve(f!, Vector(yprev), autodiff=:forward, ftol=1e-12)
         y .= sol.zero
         return nothing
     end

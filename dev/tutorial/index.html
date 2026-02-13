@@ -80,22 +80,22 @@ function program(x)
     z = y.^2
     return z
 end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Precompiling</span></span> packages...
-    539.4 ms<span class="sgr32">  ✓ </span>SparseArraysExt<span class="sgr90"> (serial)</span>
+    575.9 ms<span class="sgr32">  ✓ </span>SparseArraysExt<span class="sgr90"> (serial)</span>
   1 dependency successfully precompiled in 1 seconds
 <span class="sgr32"><span class="sgr1">Precompiling</span></span> packages...
-   1513.0 ms<span class="sgr32">  ✓ </span>ChainRulesCoreSparseArraysExt<span class="sgr90"> (serial)</span>
+   1524.5 ms<span class="sgr32">  ✓ </span>ChainRulesCoreSparseArraysExt<span class="sgr90"> (serial)</span>
   1 dependency successfully precompiled in 2 seconds
 <span class="sgr32"><span class="sgr1">Precompiling</span></span> packages...
-    539.3 ms<span class="sgr32">  ✓ </span>DistancesSparseArraysExt<span class="sgr90"> (serial)</span>
+    577.7 ms<span class="sgr32">  ✓ </span>DistancesSparseArraysExt<span class="sgr90"> (serial)</span>
   1 dependency successfully precompiled in 1 seconds
 <span class="sgr32"><span class="sgr1">Precompiling</span></span> packages...
-    537.5 ms<span class="sgr32">  ✓ </span>DifferentiationInterfaceSparseArraysExt<span class="sgr90"> (serial)</span>
+    572.1 ms<span class="sgr32">  ✓ </span>DifferentiationInterfaceSparseArraysExt<span class="sgr90"> (serial)</span>
   1 dependency successfully precompiled in 1 seconds
 <span class="sgr32"><span class="sgr1">Precompiling</span></span> packages...
-    557.7 ms<span class="sgr32">  ✓ </span>ArrayInterfaceSparseArraysExt<span class="sgr90"> (serial)</span>
+    561.8 ms<span class="sgr32">  ✓ </span>ArrayInterfaceSparseArraysExt<span class="sgr90"> (serial)</span>
   1 dependency successfully precompiled in 1 seconds
 <span class="sgr32"><span class="sgr1">Precompiling</span></span> packages...
-    535.9 ms<span class="sgr32">  ✓ </span>FiniteDiffSparseArraysExt<span class="sgr90"> (serial)</span>
+    577.9 ms<span class="sgr32">  ✓ </span>FiniteDiffSparseArraysExt<span class="sgr90"> (serial)</span>
   1 dependency successfully precompiled in 1 seconds</code></pre><p>This function is actually not compatible with ForwardDiff because of the use of a sparse matrix (obviously unnecessary with such a small matrix, just for illustration).  We now modify this function using this package, with a one line change using <code>implicit_linear</code>, and can now compute the Jacobian.</p><p>Let&#39;s consider a simple example.</p><pre><code class="language-julia hljs">using ImplicitAD
 using ForwardDiff
 using ReverseDiff
@@ -189,7 +189,7 @@ function robertson(r, dy, y, t, xd, xci, p)
     r[3] = y[1] + y[2] + y[3] - xd[4]
 end</code></pre><p>To update each state we use an implicit Euler method for simplicity:</p><pre><code class="language-julia hljs">residual!(r, y, yprev, t, tprev, xd, xci, p) = robertson(r, (y .- yprev)/(t - tprev), y, t, xd, xci, p)</code></pre><p>To solve these sets of residuals, we use the default trust-region method in NLsolve as our solver.  This now provides the expected form of our one-step update.  Note that it looks just like the explicit case since the solver occurs inside.</p><pre><code class="language-julia hljs">function onestep!(y, yprev, t, tprev, xd, xci, p)
     f!(r, yt) = residual!(r, yt, yprev, t, tprev, xd, xci, p)
-    sol = nlsolve(f!, yprev, autodiff=:forward, ftol=1e-12)
+    sol = nlsolve(f!, Vector(yprev), autodiff=:forward, ftol=1e-12)
     y .= sol.zero
     return nothing
 end</code></pre><p>We again need an initialization function and to set the time steps, design variables, control variables, and parameters:</p><pre><code class="language-julia hljs">function initialize(t0, xd, xc0, p)
@@ -369,4 +369,4 @@ if __name__ == &quot;__main__&quot;:
     prob.run_model()
     print(prob[&#39;f&#39;])
     # large abs error becuase derivatives are large (order 10^5) in this unscaled example
-    prob.check_partials(compact_print=True, abs_err_tol=1.0, rel_err_tol=1.0E-5)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../reference/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Wednesday 3 December 2025 17:11">Wednesday 3 December 2025</span>. Using Julia version 1.12.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+    prob.check_partials(compact_print=True, abs_err_tol=1.0, rel_err_tol=1.0E-5)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../reference/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 13 February 2026 00:58">Friday 13 February 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
